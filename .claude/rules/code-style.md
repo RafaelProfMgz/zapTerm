@@ -8,15 +8,21 @@
 - **Código em inglês**: nomes de funções/variáveis e comentários seguem o
   padrão já existente (comentários em inglês).
 
-## Visual (estilo lazyvim)
+## Visual (terminal hacker / matrix, estilo lazyvim)
 
+- Tema padrão: **verde-sobre-preto** (lime/palegreen/springgreen), definido
+  em `config/settings.go`. Estética de "protocolo": tags em colchetes
+  (`[ONLINE]`, `[F1] AJUDA`, `[3]` não lidas), prompt `você@zapterm:~$`,
+  mensagens estilo IRC `[15:04:05] <nome> texto`, separadores `<<< ... >>>`,
+  títulos de painel `[ MAIÚSCULAS ]`.
 - **Sem emojis na interface.** Marcadores minimalistas: `#` para grupos,
-  `●` para não lidas, `▶` para reprodução, `…` para truncar. Antes de
-  adicionar qualquer ícone novo, preferir texto.
+  `*` para a conversa aberta, `[n]` para não lidas, `▶` para reprodução,
+  `…` para truncar. Antes de adicionar qualquer ícone novo, preferir texto.
+- Colchetes literais em TextView com cores dinâmicas DEVEM passar por
+  `tview.Escape()` (senão viram tag de cor) — vale para `[ONLINE]`,
+  `[15:04:05]`, `[3]` e qualquer texto vindo do usuário/WhatsApp.
 - Cores sempre via `config.Config.Colors.*` + `tcell.ColorNames[...]` —
   nunca cor hardcoded (exceto tags dim/bold `[::d]`/`[::b]`).
-- Texto vindo do usuário/WhatsApp passa por `tview.Escape()` antes de entrar
-  em um TextView com cores dinâmicas (nomes de contato inclusive).
 
 ## Go
 

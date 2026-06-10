@@ -31,8 +31,9 @@ linha 1, `textInput` (linha 2), `hintBar` (linha 3). Tudo dentro de
   `chatFilter` global. Teclas `1-4` e `f` (registradas em `keysChatPanel`
   dentro de `LoadShortcuts`). Filtro "Todas" só mostra chats com atividade
   (`LastMessage > 0`), exceto antes do primeiro sync.
-- Formato da linha: `formatChatEntry()` — nome truncado à esquerda
-  (runewidth), à direita `N●` (não lidas) ou horário curto
+- Formato da linha: `formatChatEntry()` — `* ` marca a conversa aberta
+  (atualizado por `refreshChatMarkers()` sem rebuild), nome truncado à
+  esquerda (runewidth), à direita `[N]` (não lidas) ou horário curto
   (`shortChatTime`: hoje→`15:04`, semana→`seg`, antigo→`02/01`).
   Grupos têm prefixo `# `. Sem emojis (regra do projeto).
 - Navegar (changed) abre a conversa; Enter (selected) abre e foca o input.
@@ -42,10 +43,12 @@ linha 1, `textInput` (linha 2), `hintBar` (linha 3). Tudo dentro de
 - `getMessagesString()` monta o chat inteiro; insere separador de data
   (`dateSeparator`) quando o dia muda. `UiHandler.NewMessage` (mensagem ao
   vivo) faz a mesma checagem comparando com a última de `curRegions`.
-- `getTextMessageString()` formata uma mensagem: região clicável
-  `["msgId"]...[""]` (tview regions), hora `15:04`, `Eu`/nome do contato,
-  dica de mídia (`mediaHint`: teclas por tipo + duração de áudio/vídeo) e
-  marcador `▶ tocando` quando `msg.Id == currentPlayingMsgId()`.
+- `getTextMessageString()` formata uma mensagem estilo IRC
+  `[15:04:05] <nome> texto`: região clicável `["msgId"]...[""]` (tview
+  regions), `<eu>` para mensagens próprias, dica de mídia (`mediaHint`:
+  teclas em colchetes + duração de áudio/vídeo) e marcador `▶ TOCANDO`
+  quando `msg.Id == currentPlayingMsgId()`. Colchetes literais passam por
+  `tview.Escape`.
 - `curRegions []messages.Message` é a lista de mensagens na tela — paralela
   às regiões do textView; toda navegação/seleção usa ela.
 - Clique em mensagem: capturado em `SetHighlightedFunc` — áudio envia

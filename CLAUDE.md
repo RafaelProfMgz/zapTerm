@@ -50,9 +50,13 @@ make release     # tag + workflow de release (GitHub Actions)
 
 ## Convenções rápidas
 
-- UI em pt-BR; sem emojis (marcadores: `#` grupo, `●` não lida, `▶` tocando).
+- UI em pt-BR; tema matrix verde-sobre-preto, estética de terminal: tags em
+  colchetes (`[ONLINE]`, `[3]`), mensagens IRC `[15:04:05] <nome>`, prompt
+  `você@zapterm:~$`. Sem emojis (marcadores: `#` grupo, `*` conversa aberta,
+  `▶` tocando).
 - Cores sempre via `config.Config.Colors` + `tcell.ColorNames`.
-- Texto externo passa por `tview.Escape()` antes de ir para TextViews.
+- Texto externo E colchetes literais passam por `tview.Escape()` antes de ir
+  para TextViews (colchete sem escape vira tag de cor).
 - Config nova = campo + default em `config/settings.go` (INI usa
   title_underscore); atalho novo = `Keymap` + `LoadShortcuts()` + ajuda F1.
 - Código deve cross-compilar para Windows (`make dist`).
