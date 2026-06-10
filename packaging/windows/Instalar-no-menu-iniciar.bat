@@ -38,9 +38,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$s.IconLocation = '%ZAP_EXE%,0';" ^
   "$s.Save()"
 
+REM Atalho "Atualizar ZapTerm": um clique baixa a ultima versao do GitHub
+REM e substitui o app e os atalhos.
+set "UPDATER=%ZAP_DIR%Atualizar-ZapTerm.bat"
+set "LINKUPD=%STARTMENU%\Atualizar ZapTerm.lnk"
+if exist "%UPDATER%" (
+    echo ==^> Criando atalho "Atualizar ZapTerm" no Menu Iniciar...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "$w = New-Object -ComObject WScript.Shell;" ^
+      "$s = $w.CreateShortcut('%LINKUPD%');" ^
+      "$s.TargetPath = '%UPDATER%';" ^
+      "$s.WorkingDirectory = '%ZAP_DIR%';" ^
+      "$s.Description = 'Baixa a versao mais recente do ZapTerm e reinstala o app e os atalhos';" ^
+      "$s.IconLocation = '%ZAP_EXE%,0';" ^
+      "$s.Save()"
+)
+
 if exist "%LINK%" (
     echo.
     echo  Pronto! Procure por "ZapTerm" no Menu Iniciar.
+    echo  Para atualizar no futuro: "Atualizar ZapTerm", tambem no Menu Iniciar.
     echo.
 ) else (
     echo.

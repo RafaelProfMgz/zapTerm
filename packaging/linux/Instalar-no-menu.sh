@@ -44,9 +44,10 @@ install -m 0755 "$LAUNCHER_ORIGEM" "$LAUNCHER_DEST"
 # instala o atualizador como "zapterm-update" (baixa a release mais recente
 # do GitHub e reinstala tudo), se ele estiver presente na pasta
 UPDATER_ORIGEM="$DIR/Atualizar-ZapTerm.sh"
+UPDATER_DEST="$HOME/.local/bin/zapterm-update"
 if [ -f "$UPDATER_ORIGEM" ]; then
-  echo "==> Instalando atualizador em: $HOME/.local/bin/zapterm-update"
-  install -m 0755 "$UPDATER_ORIGEM" "$HOME/.local/bin/zapterm-update"
+  echo "==> Instalando atualizador em: $UPDATER_DEST"
+  install -m 0755 "$UPDATER_ORIGEM" "$UPDATER_DEST"
 fi
 
 echo "==> Instalando icone..."
@@ -73,6 +74,26 @@ Keywords=whatsapp;zap;chat;mensagens;terminal;cli;
 EOF
 chmod +x "$DESKTOP"
 
+# atalho "Atualizar ZapTerm" no menu: um clique baixa a ultima versao e
+# reinstala tudo (o proprio updater abre um terminal para mostrar o progresso)
+if [ -f "$UPDATER_DEST" ]; then
+  echo "==> Criando atalho \"Atualizar ZapTerm\" no menu..."
+  DESKTOP_UPDATE="$APP_DIR/zapterm-update.desktop"
+  cat > "$DESKTOP_UPDATE" <<EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Atualizar ZapTerm
+Comment=Baixa a versao mais recente do ZapTerm e reinstala o app e os atalhos
+Exec=$UPDATER_DEST
+Icon=system-software-update
+Terminal=false
+Categories=Network;Settings;
+Keywords=zapterm;atualizar;update;upgrade;
+EOF
+  chmod +x "$DESKTOP_UPDATE"
+fi
+
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
 fi
@@ -80,5 +101,5 @@ fi
 echo ""
 echo "Pronto! Procure por \"ZapTerm\" no menu/tela inicial."
 echo "Tambem da para rodar pelo terminal digitando: zapterm"
-echo "Para atualizar para a versao mais recente: zapterm-update"
+echo "Para atualizar: clique em \"Atualizar ZapTerm\" no menu (ou rode: zapterm-update)"
 echo "(se 'zapterm' nao for encontrado, adicione \$HOME/.local/bin ao seu PATH)"

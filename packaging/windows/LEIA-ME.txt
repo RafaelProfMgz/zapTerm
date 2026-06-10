@@ -20,7 +20,9 @@ SO QUERO TESTAR (sem instalar)
 - De dois cliques em "Abrir-ZapTerm.bat".
 
 PARA ATUALIZAR
-- Feche o ZapTerm e de dois cliques em "Atualizar-ZapTerm.bat".
+- Feche o ZapTerm e clique em "Atualizar ZapTerm" no Menu Iniciar:
+  ele baixa a versao mais recente e reinstala tudo sozinho.
+  (Tambem da para dar dois cliques em "Atualizar-ZapTerm.bat".)
 
 OBSERVACOES
 - O Windows pode mostrar um aviso do SmartScreen na primeira vez:

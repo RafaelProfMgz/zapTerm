@@ -25,8 +25,11 @@ SO QUERO TESTAR (sem instalar)
    bash Abrir-ZapTerm.sh
 
 PARA ATUALIZAR
-   bash Atualizar-ZapTerm.sh
-   (ou, depois de instalado no menu, rode:  zapterm-update)
+   Depois de instalado, clique em "Atualizar ZapTerm" no menu de
+   aplicativos: ele baixa a versao mais recente e reinstala tudo
+   (programa, icone e atalhos) sozinho.
+   Tambem funciona pelo terminal:  zapterm-update
+   (ou, direto desta pasta:  bash Atualizar-ZapTerm.sh)
 
 OBSERVACOES
 - Na primeira vez e preciso escanear o QR Code; depois reconecta sozinho.
