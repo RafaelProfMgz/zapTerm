@@ -69,11 +69,11 @@ func main() {
 	bg := tcell.ColorNames[config.Config.Colors.Background]
 	cmdPrefix := config.Config.General.CmdPrefix
 
-	// top bar: branding (left)
+	// top bar: branding (left), mock-terminal protocol header style
 	topBar = tview.NewTextView()
 	topBar.SetDynamicColors(true)
 	topBar.SetScrollable(false)
-	topBar.SetText("[::b] ZapTerm " + VERSION + " [-::-]")
+	topBar.SetText(" [::b]ZAPTERM " + VERSION + "[-::-] [::d]— PROTOCOLO WHATSAPP · CONEXÃO CRIPTOGRAFADA[::-]")
 	topBar.SetBackgroundColor(bg)
 
 	// info bar: connection status (right)
@@ -94,7 +94,7 @@ func main() {
 	textView.SetBackgroundColor(bg)
 	textView.SetTextColor(tcell.ColorNames[config.Config.Colors.Text])
 	textView.SetBorder(true)
-	textView.SetTitle(" Mensagens ")
+	textView.SetTitle(" [ MENSAGENS ] ")
 	textView.SetTitleAlign(tview.AlignLeft)
 	// A mouse click on a message region highlights it (tview behavior); when the
 	// highlighted message is an attachment, the click also opens it in the
@@ -129,15 +129,16 @@ func main() {
 
 	PrintHelp()
 
-	// input field
+	// input field: shell-prompt style ("você@zapterm:~$ "), like a command line
 	textInput = tview.NewInputField()
 	textInput.SetBackgroundColor(bg)
 	textInput.SetFieldBackgroundColor(tcell.ColorNames[config.Config.Colors.InputBackground])
 	textInput.SetFieldTextColor(tcell.ColorNames[config.Config.Colors.InputText])
-	textInput.SetPlaceholder("Escolha uma conversa, digite e Enter para enviar  (ou " + cmdPrefix + "comando)")
+	textInput.SetLabel("você@zapterm:~$ ")
+	textInput.SetLabelColor(tcell.ColorNames[config.Config.Colors.Positive])
+	textInput.SetPlaceholder("digite_mensagem_ou_comando…  (" + cmdPrefix + "comando · Enter envia)")
 	textInput.SetPlaceholderTextColor(tcell.ColorNames[config.Config.Colors.Borders])
 	textInput.SetBorder(true)
-	textInput.SetTitle(" Mensagem / Comando ")
 	textInput.SetTitleAlign(tview.AlignLeft)
 	textInput.SetChangedFunc(func(change string) {
 		sndTxt = change
@@ -174,7 +175,7 @@ func main() {
 	// chat list panel
 	MakeTree()
 	treeView.SetBorder(true)
-	treeView.SetTitle(" Conversas ")
+	treeView.SetTitle(" [ CONVERSAS ] ")
 	treeView.SetTitleAlign(tview.AlignLeft)
 
 	// bottom hint bar (always-visible key guide)
@@ -190,7 +191,7 @@ func main() {
 	helpView.SetBackgroundColor(bg)
 	helpView.SetTextColor(tcell.ColorNames[config.Config.Colors.Text])
 	helpView.SetBorder(true)
-	helpView.SetTitle(" Ajuda — teclas e comandos (Esc ou ? para fechar) ")
+	helpView.SetTitle(" [ AJUDA ] teclas e comandos — Esc ou ? fecha ")
 	helpView.SetTitleAlign(tview.AlignLeft)
 	helpView.SetTitleColor(tcell.ColorNames[config.Config.Colors.ListHeader])
 	helpView.SetBorderColor(tcell.ColorNames[config.Config.Colors.ListHeader])
@@ -320,18 +321,23 @@ func showHelp() {
 	}
 }
 
-// hintText builds the always-visible bottom key guide.
+// hintText builds the always-visible bottom key guide, taskbar style:
+// "[CTRL+Q] SAIR  [TAB] PAINEL ..." (keys in brackets, like the terminal mock).
 func hintText() string {
 	k := config.Config.Keymap
 	c := config.Config.Colors.ListHeader
 	q := config.Config.Colors.Negative
-	key := func(color, s string) string { return "[" + color + "::b]" + s + "[-::-]" }
+	key := func(color, ks, label string) string {
+		return "[" + color + "::b]" + tview.Escape("["+strings.ToUpper(ks)+"]") + "[-::-] " + label
+	}
 	// quit comes first, in the "negative" color, so closing the app is unmissable
-	return " " + key(q, k.CommandQuit) + " SAIR   " +
-		key(c, "Tab") + " trocar painel   " + key(c, "↑/↓") + " navegar   " +
-		key(c, "Enter") + " enviar   " + key(c, k.FindChats) + " buscar   " +
-		key(c, "1-4") + " filtrar conversas   " + key(c, k.MessagePlay) + " tocar áudio   " +
-		key(c, "F1") + "/" + key(c, "?") + " ajuda "
+	return " " + key(q, k.CommandQuit, "SAIR") + "  " +
+		key(c, "TAB", "PAINEL") + "  " +
+		key(c, "ENTER", "ENVIAR") + "  " +
+		key(c, k.FindChats, "BUSCAR") + "  " +
+		key(c, "1-4", "FILTRAR") + "  " +
+		key(c, k.MessagePlay, "ÁUDIO") + "  " +
+		key(c, "F1", "AJUDA") + " "
 }
 
 // chat list filters, WhatsApp-Web style: a flat recency-sorted list that can be
@@ -430,9 +436,9 @@ func shortChatTime(ts int64) string {
 	return t.Format("02/01")
 }
 
-// formatChatEntry renders one chat list line: the name on the left and, on the
-// right, either the unread count or the time of the last message. Groups get a
-// minimal "#" marker (no emoji icons).
+// formatChatEntry renders one chat list line: "*" marks the open chat (like
+// the mock), then the name, and on the right either the unread count ("[3]")
+// or the time of the last message. Groups get a minimal "#" marker, no emojis.
 func formatChatEntry(c messages.Chat, width int) string {
 	name := c.Name
 	if name == "" {
@@ -441,13 +447,18 @@ func formatChatEntry(c messages.Chat, width int) string {
 	if c.IsGroup {
 		name = "# " + name
 	}
+	marker := "  "
+	if c.Id != "" && c.Id == currentReceiver.Id {
+		marker = "* "
+	}
+	name = marker + name
 
 	right := ""
 	rightWidth := 0
 	if c.Unread > 0 {
-		right = fmt.Sprintf("%d●", c.Unread)
-		rightWidth = runewidth.StringWidth(right)
-		right = "[" + config.Config.Colors.UnreadCount + "::b]" + right + "[-::-]"
+		badge := fmt.Sprintf("[%d]", c.Unread)
+		rightWidth = runewidth.StringWidth(badge)
+		right = "[" + config.Config.Colors.UnreadCount + "::b]" + tview.Escape(badge) + "[-::-]"
 	} else if c.LastMessage > 0 {
 		right = shortChatTime(c.LastMessage)
 		rightWidth = runewidth.StringWidth(right)
@@ -468,6 +479,20 @@ func formatChatEntry(c messages.Chat, width int) string {
 		out = "[::b]" + out + "[::-]"
 	}
 	return out + strings.Repeat(" ", pad) + right
+}
+
+// refreshChatMarkers re-renders the sidebar labels so the "*" marker follows
+// the open chat without rebuilding the tree (which would move the selection).
+func refreshChatMarkers() {
+	if chatRoot == nil {
+		return
+	}
+	width := config.Config.Ui.ChatSidebarWidth - 2
+	for _, node := range chatRoot.GetChildren() {
+		if c, ok := node.GetReference().(messages.Chat); ok {
+			node.SetText(formatChatEntry(c, width))
+		}
+	}
 }
 
 // rebuildChatTree repopulates the sidebar from allChats honoring the active
@@ -513,7 +538,7 @@ func rebuildChatTree() {
 		chatRoot.AddChild(node)
 		shown++
 	}
-	treeView.SetTitle(fmt.Sprintf(" Conversas · %s (%d) ", chatFilterNames[chatFilter], shown))
+	treeView.SetTitle(fmt.Sprintf(" [ %s (%d) ] ", strings.ToUpper(chatFilterNames[chatFilter]), shown))
 	if selectedNode != nil {
 		treeView.SetCurrentNode(selectedNode)
 	}
@@ -831,18 +856,19 @@ func LoadShortcuts() {
 	treeView.SetInputCapture(keysChatPanel.Capture)
 }
 
-// PrintHelp prints a short welcome into the message panel.
+// PrintHelp prints a short welcome into the message panel, boot-log style.
 func PrintHelp() {
 	cmdPrefix := config.Config.General.CmdPrefix
 	hdr := config.Config.Colors.ListHeader
-	fmt.Fprintln(textView, "[-:-:b]Bem-vindo ao ZapTerm "+VERSION+"[-:-:-]")
+	fmt.Fprintln(textView, "[-:-:b]ZAPTERM "+VERSION+" — PROTOCOLO WHATSAPP[-:-:-]")
+	fmt.Fprintln(textView, "[::d]<<< terminal seguro · criptografia de ponta a ponta >>>[::-]")
 	fmt.Fprintln(textView, "")
-	fmt.Fprintln(textView, " • [::b]Tab[::-] alterna os painéis: [::b]Conversas[::-] → [::b]Mensagens[::-] → [::b]digitação[::-].")
-	fmt.Fprintln(textView, " • Escolha uma conversa à esquerda (↑/↓ e Enter) e digite embaixo para responder.")
-	fmt.Fprintln(textView, " • Na lista: [::b]1-4[::-] filtram (Todas · Não lidas · Grupos · Contatos).")
-	fmt.Fprintln(textView, " • Áudios: clique ou selecione e pressione ["+hdr+"::b]"+config.Config.Keymap.MessagePlay+"[-::-] para tocar no terminal.")
-	fmt.Fprintln(textView, " • Pressione ["+hdr+"::b]F1[-::-] ou ["+hdr+"::b]?[-::-] a qualquer momento para o guia completo.")
-	fmt.Fprintln(textView, " • "+cmdPrefix+"connect conecta · "+cmdPrefix+"quit (ou "+config.Config.Keymap.CommandQuit+") sai.")
+	fmt.Fprintln(textView, " > [::b]Tab[::-] alterna os painéis: [::b]Conversas[::-] → [::b]Mensagens[::-] → [::b]digitação[::-].")
+	fmt.Fprintln(textView, " > Escolha uma conversa à esquerda (↑/↓ e Enter) e digite embaixo para responder.")
+	fmt.Fprintln(textView, " > Na lista: [::b]1-4[::-] filtram (Todas · Não lidas · Grupos · Contatos).")
+	fmt.Fprintln(textView, " > Áudios: clique ou selecione e pressione ["+hdr+"::b]"+config.Config.Keymap.MessagePlay+"[-::-] para tocar no terminal.")
+	fmt.Fprintln(textView, " > Pressione ["+hdr+"::b]F1[-::-] ou ["+hdr+"::b]?[-::-] a qualquer momento para o guia completo.")
+	fmt.Fprintln(textView, " > "+cmdPrefix+"connect conecta · "+cmdPrefix+"quit (ou "+config.Config.Keymap.CommandQuit+") sai.")
 	fmt.Fprintln(textView, "")
 }
 
@@ -1114,32 +1140,19 @@ func maybeAutoShowImage(msg messages.Message) {
 	}
 }
 
-// updates the status bar
+// updates the status bar: "[ONLINE]"/"[OFFLINE]" tag, terminal-mock style.
+// (battery info was dropped — the multi-device API doesn't report it anymore)
 func UpdateStatusBar(statusInfo messages.SessionStatus) {
-	out := " "
+	out := ""
 	if statusInfo.Connected {
-		out += "[" + config.Config.Colors.Positive + "]online[-]"
+		out += "[" + config.Config.Colors.Positive + "::b]" + tview.Escape("[ONLINE]") + "[-::-]"
 	} else {
-		out += "[" + config.Config.Colors.Negative + "]offline[-]"
+		out += "[" + config.Config.Colors.Negative + "::b]" + tview.Escape("[OFFLINE]") + "[-::-]"
 	}
-	out += " "
-	out += "[::d] ("
-	out += fmt.Sprint(statusInfo.BatteryCharge)
-	out += "%"
-	if statusInfo.BatteryLoading {
-		out += " [" + config.Config.Colors.Positive + "]L[-]"
-	} else {
-		out += " [" + config.Config.Colors.Negative + "]l[-]"
+	if statusInfo.LastSeen != "" {
+		out += " [::d]" + tview.Escape(statusInfo.LastSeen) + "[::-]"
 	}
-	if statusInfo.BatteryPowersave {
-		out += " [" + config.Config.Colors.Negative + "]S[-]"
-	} else {
-		out += " [" + config.Config.Colors.Positive + "]s[-]"
-	}
-	out += ")[::-] "
-	out += statusInfo.LastSeen
-	infoBar.SetText(out)
-	//infoBar.SetText("🔋: ??%")
+	infoBar.SetText(out + " ")
 }
 
 // sets the current chat, loads text from storage to TextView
@@ -1148,16 +1161,17 @@ func SetDisplayedChat(wid messages.Chat) {
 	currentReceiver = wid
 	textView.Clear()
 	if wid.Name != "" {
-		textView.SetTitle(" " + wid.Name + " ")
+		textView.SetTitle(" [ " + wid.Name + " ] ")
 	} else {
-		textView.SetTitle(" Mensagens ")
+		textView.SetTitle(" [ MENSAGENS ] ")
 	}
+	refreshChatMarkers()
 	sessionManager.CommandChannel <- messages.Command{"select", []string{currentReceiver.Id}}
 }
 
-// dateSeparator renders a dim horizontal rule with the day, WhatsApp-style.
+// dateSeparator renders a dim day marker between messages, terminal-mock style.
 func dateSeparator(t time.Time) string {
-	return fmt.Sprintf("[::d]──────── %s, %s ────────[::-]",
+	return fmt.Sprintf("[::d]<<< %s, %s >>>[::-]",
 		weekdaysPt[t.Weekday()], t.Format("02/01/2006"))
 }
 
@@ -1187,31 +1201,34 @@ func formatDuration(secs uint32) string {
 	return fmt.Sprintf("%d:%02d", secs/60, secs%60)
 }
 
-// mediaHint returns the dim usage hint appended to attachment messages.
+// mediaHint returns the usage hint appended to attachment messages, with the
+// keys in brackets like the mock ("0:23 · [p] tocar · [o] abrir"). The caller
+// escapes it, so brackets here are literal.
 func mediaHint(msg *messages.Message) string {
 	k := config.Config.Keymap
 	switch msg.Kind {
 	case messages.MessageKindAudio:
-		hint := k.MessagePlay + "/clique toca · " + k.MessageOpen + " abre"
+		hint := "[" + k.MessagePlay + "/clique] tocar · [" + k.MessageOpen + "] abrir"
 		if msg.DurationSecs > 0 {
 			hint = formatDuration(msg.DurationSecs) + " · " + hint
 		}
 		return hint
 	case messages.MessageKindVideo:
-		hint := k.MessagePlay + " toca · " + k.MessageOpen + "/clique abre"
+		hint := "[" + k.MessagePlay + "] tocar · [" + k.MessageOpen + "/clique] abrir"
 		if msg.DurationSecs > 0 {
 			hint = formatDuration(msg.DurationSecs) + " · " + hint
 		}
 		return hint
 	case messages.MessageKindImage:
-		return k.MessageShow + " exibe · " + k.MessageOpen + "/clique abre"
+		return "[" + k.MessageShow + "] exibir · [" + k.MessageOpen + "/clique] abrir"
 	case messages.MessageKindDocument:
-		return k.MessageOpen + "/clique abre"
+		return "[" + k.MessageOpen + "/clique] abrir"
 	}
 	return ""
 }
 
-// create a formatted string with regions based on message ID from a text message
+// create a formatted string with regions based on message ID from a text
+// message, IRC style: "[15:04:12] <nome> texto".
 func getTextMessageString(msg *messages.Message) string {
 	colorMe := config.Config.Colors.ChatMe
 	colorContact := config.Config.Colors.ChatContact
@@ -1220,20 +1237,22 @@ func getTextMessageString(msg *messages.Message) string {
 	if msg.Forwarded {
 		text = "[" + config.Config.Colors.ForwardedText + "]" + text + "[-]"
 	}
-	timeStr := time.Unix(int64(msg.Timestamp), 0).Format("15:04")
+	stamp := time.Unix(int64(msg.Timestamp), 0).Format("15:04:05")
 	out += "[\""
 	out += msg.Id
 	out += "\"]"
+	out += "[-::d]" + tview.Escape("["+stamp+"]") + "[-::-] "
 	if msg.FromMe { //msg from me
-		out += "[-::d]" + timeStr + "[-::-] [" + colorMe + "::b]Eu[-::-] " + text
+		out += "[" + colorMe + "::b]<eu>[-::-] " + text
 	} else { // message from others
-		out += "[-::d]" + timeStr + "[-::-] [" + colorContact + "::b]" + tview.Escape(msg.ContactShort) + "[-::-] " + text
+		out += "[" + colorContact + "::b]<" + tview.Escape(msg.ContactShort) + ">[-::-] " + text
 	}
 	if hint := mediaHint(msg); hint != "" {
-		out += " [::d](" + hint + ")[::-]"
+		out += " [::d]" + tview.Escape(hint) + "[::-]"
 	}
 	if msg.Id != "" && msg.Id == currentPlayingMsgId() {
-		out += " [" + config.Config.Colors.Positive + "::b]▶ tocando[-::-] [::d](" + config.Config.Keymap.MessagePlay + " para)[::-]"
+		out += " [" + config.Config.Colors.Positive + "::b]▶ TOCANDO[-::-] [::d]" +
+			tview.Escape("["+config.Config.Keymap.MessagePlay+"] parar") + "[::-]"
 	}
 	// an already-rendered image lives inside the message region, so clicking
 	// the picture itself also opens the native viewer
@@ -1270,7 +1289,7 @@ func (u UiHandler) NewScreen(msgs []messages.Message) {
 			if currentReceiver.Id == "" {
 				PrintHelp()
 			} else {
-				PrintText("[::d] ~~~ no messages, press " + config.Config.Keymap.CommandBacklog + " to load backlog if available ~~~[::-]")
+				PrintText("[::d]<<< sem mensagens — " + tview.Escape("["+config.Config.Keymap.CommandBacklog+"]") + " carrega o histórico >>>[::-]")
 			}
 		}
 	})
