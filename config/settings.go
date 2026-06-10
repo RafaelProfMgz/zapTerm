@@ -35,6 +35,9 @@ type General struct {
 	InlineImages bool
 	// InlineImageLines is the maximum height (in terminal rows) of an inline image.
 	InlineImageLines int
+	// AudioCommand is the player used for audio messages (e.g. "mpv --no-video").
+	// Leave empty to auto-detect mpv, ffplay, play (sox) or cvlc.
+	AudioCommand string
 }
 
 type Keymap struct {
@@ -53,6 +56,7 @@ type Keymap struct {
 	MessageDownload string
 	MessageOpen     string
 	MessageShow     string
+	MessagePlay     string
 	MessageUrl      string
 	MessageInfo     string
 	MessageRevoke   string
@@ -119,6 +123,7 @@ var Config = IniFile{
 		BacklogMsgQuantity:  10,
 		InlineImages:        true,
 		InlineImageLines:    14,
+		AudioCommand:        "",
 	},
 	&Keymap{
 		SwitchPanels:    "Tab",
@@ -136,6 +141,7 @@ var Config = IniFile{
 		MessageDownload: "d",
 		MessageInfo:     "i",
 		MessageOpen:     "o",
+		MessagePlay:     "p",
 		MessageUrl:      "u",
 		MessageRevoke:   "r",
 		MessageShow:     "s",
