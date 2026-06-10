@@ -10,6 +10,7 @@ import (
 
 	"code.rocketnine.space/tslocum/cbind"
 	"github.com/gdamore/tcell/v2"
+	"github.com/mattn/go-runewidth"
 	"github.com/normen/whatscli/config"
 	"github.com/normen/whatscli/messages"
 	"github.com/rivo/tview"
@@ -115,8 +116,11 @@ func main() {
 				continue
 			}
 			switch msg.Kind {
+			case messages.MessageKindAudio:
+				// clicking a voice message plays it right in the terminal
+				sessionManager.CommandChannel <- messages.Command{"play", []string{msg.Id}}
 			case messages.MessageKindImage, messages.MessageKindVideo,
-				messages.MessageKindAudio, messages.MessageKindDocument:
+				messages.MessageKindDocument:
 				sessionManager.CommandChannel <- messages.Command{"open", []string{msg.Id}}
 			}
 			return
@@ -326,34 +330,193 @@ func hintText() string {
 	return " " + key(q, k.CommandQuit) + " SAIR   " +
 		key(c, "Tab") + " trocar painel   " + key(c, "↑/↓") + " navegar   " +
 		key(c, "Enter") + " enviar   " + key(c, k.FindChats) + " buscar   " +
-		key(c, "F1") + "/" + key(c, "?") + " ajuda   " +
-		key(c, k.FocusChats) + " conversas   " + key(c, k.FocusMessages) + " mensagens "
+		key(c, "1-4") + " filtrar conversas   " + key(c, k.MessagePlay) + " tocar áudio   " +
+		key(c, "F1") + "/" + key(c, "?") + " ajuda "
 }
 
-// creates the TreeView for chats
+// chat list filters, WhatsApp-Web style: a flat recency-sorted list that can be
+// narrowed down to unread chats, groups or 1:1 contacts.
+const (
+	chatFilterAll = iota
+	chatFilterUnread
+	chatFilterGroups
+	chatFilterContacts
+)
+
+var chatFilterNames = []string{"Todas", "Não lidas", "Grupos", "Contatos"}
+var chatFilter = chatFilterAll
+
+// creates the TreeView for chats: a flat, recency-sorted list (the tree root is
+// hidden and graphics are off, so it reads like a plain chat list).
 func MakeTree() *tview.TreeView {
-	rootDir := "Conversas"
-	chatRoot = tview.NewTreeNode(rootDir).
+	chatRoot = tview.NewTreeNode("Conversas").
 		SetColor(tcell.ColorNames[config.Config.Colors.ListHeader])
 	treeView = tview.NewTreeView().
 		SetRoot(chatRoot).
+		SetTopLevel(1).
 		SetCurrentNode(chatRoot)
+	treeView.SetGraphics(false)
 	treeView.SetBackgroundColor(tcell.ColorNames[config.Config.Colors.Background])
 
-	// Moving onto a chat leaf opens it; root/category headers carry no chat
-	// reference, so navigating over them leaves the current chat untouched.
+	// Moving onto a chat opens it.
 	treeView.SetChangedFunc(func(node *tview.TreeNode) {
 		if chat, ok := node.GetReference().(messages.Chat); ok {
 			SetDisplayedChat(chat)
 		}
 	})
-	// Enter on a category header ("Grupos"/"Contatos") collapses/expands it.
+	// Enter on a chat jumps to the input field to start typing right away.
 	treeView.SetSelectedFunc(func(node *tview.TreeNode) {
-		if len(node.GetChildren()) > 0 {
-			node.SetExpanded(!node.IsExpanded())
+		if chat, ok := node.GetReference().(messages.Chat); ok {
+			SetDisplayedChat(chat)
+			app.SetFocus(textInput)
 		}
 	})
 	return treeView
+}
+
+// setChatFilter switches the chat list filter and rebuilds the list.
+func setChatFilter(filter int) {
+	if filter < 0 || filter >= len(chatFilterNames) {
+		return
+	}
+	chatFilter = filter
+	rebuildChatTree()
+}
+
+func handleChatFilter(filter int) func(ev *tcell.EventKey) *tcell.EventKey {
+	return func(ev *tcell.EventKey) *tcell.EventKey {
+		setChatFilter(filter)
+		return nil
+	}
+}
+
+func handleChatFilterCycle(ev *tcell.EventKey) *tcell.EventKey {
+	setChatFilter((chatFilter + 1) % len(chatFilterNames))
+	return nil
+}
+
+// chatPassesFilter reports whether a chat is visible under the current filter.
+// hasActivity tells whether any chat has messages at all: before the first
+// history sync nothing has activity yet, and "Todas" then shows everything.
+func chatPassesFilter(c messages.Chat, hasActivity bool) bool {
+	switch chatFilter {
+	case chatFilterUnread:
+		return c.Unread > 0
+	case chatFilterGroups:
+		return c.IsGroup
+	case chatFilterContacts:
+		return !c.IsGroup
+	default:
+		return !hasActivity || c.LastMessage > 0
+	}
+}
+
+// weekdaysPt maps time.Weekday to short Portuguese day names.
+var weekdaysPt = [...]string{"dom", "seg", "ter", "qua", "qui", "sex", "sáb"}
+
+// shortChatTime renders a WhatsApp-Web style timestamp for the chat list:
+// today → "15:04", last week → weekday, otherwise → "02/01".
+func shortChatTime(ts int64) string {
+	t := time.Unix(ts, 0)
+	now := time.Now()
+	ty, tm, td := t.Date()
+	ny, nm, nd := now.Date()
+	if ty == ny && tm == nm && td == nd {
+		return t.Format("15:04")
+	}
+	if now.Sub(t) < 7*24*time.Hour {
+		return weekdaysPt[t.Weekday()]
+	}
+	return t.Format("02/01")
+}
+
+// formatChatEntry renders one chat list line: the name on the left and, on the
+// right, either the unread count or the time of the last message. Groups get a
+// minimal "#" marker (no emoji icons).
+func formatChatEntry(c messages.Chat, width int) string {
+	name := c.Name
+	if name == "" {
+		name = "+" + rawJid(c.Id)
+	}
+	if c.IsGroup {
+		name = "# " + name
+	}
+
+	right := ""
+	rightWidth := 0
+	if c.Unread > 0 {
+		right = fmt.Sprintf("%d●", c.Unread)
+		rightWidth = runewidth.StringWidth(right)
+		right = "[" + config.Config.Colors.UnreadCount + "::b]" + right + "[-::-]"
+	} else if c.LastMessage > 0 {
+		right = shortChatTime(c.LastMessage)
+		rightWidth = runewidth.StringWidth(right)
+		right = "[::d]" + right + "[::-]"
+	}
+
+	avail := width - rightWidth - 1
+	if avail < 4 {
+		avail = 4
+	}
+	name = runewidth.Truncate(name, avail, "…")
+	pad := avail - runewidth.StringWidth(name) + 1
+	if pad < 1 {
+		pad = 1
+	}
+	out := tview.Escape(name)
+	if c.Unread > 0 {
+		out = "[::b]" + out + "[::-]"
+	}
+	return out + strings.Repeat(" ", pad) + right
+}
+
+// rebuildChatTree repopulates the sidebar from allChats honoring the active
+// filter, keeping the selection on the current chat when possible.
+func rebuildChatTree() {
+	if chatRoot == nil {
+		return
+	}
+	chatRoot.ClearChildren()
+	oldId := currentReceiver.Id
+
+	hasActivity := false
+	for _, c := range allChats {
+		if c.LastMessage > 0 {
+			hasActivity = true
+			break
+		}
+	}
+
+	// 2 columns are lost to the panel borders
+	width := config.Config.Ui.ChatSidebarWidth - 2
+	var selectedNode *tview.TreeNode
+	shown := 0
+	for _, element := range allChats {
+		// keep currentReceiver fresh (name/unread may have changed)
+		if element.Id == oldId {
+			currentReceiver = element
+		}
+		if !chatPassesFilter(element, hasActivity) {
+			continue
+		}
+		node := tview.NewTreeNode(formatChatEntry(element, width)).
+			SetReference(element).
+			SetSelectable(true)
+		if element.IsGroup {
+			node.SetColor(tcell.ColorNames[config.Config.Colors.ListGroup])
+		} else {
+			node.SetColor(tcell.ColorNames[config.Config.Colors.ListContact])
+		}
+		if selectedNode == nil && element.Id == currentReceiver.Id {
+			selectedNode = node
+		}
+		chatRoot.AddChild(node)
+		shown++
+	}
+	treeView.SetTitle(fmt.Sprintf(" Conversas · %s (%d) ", chatFilterNames[chatFilter], shown))
+	if selectedNode != nil {
+		treeView.SetCurrentNode(selectedNode)
+	}
 }
 
 func handleFocusMessage(ev *tcell.EventKey) *tcell.EventKey {
@@ -462,6 +625,7 @@ func safeReadClipboard() (clip string, err error) {
 }
 
 func handleQuit(ev *tcell.EventKey) *tcell.EventKey {
+	stopAudio()
 	sessionManager.CommandChannel <- messages.Command{"disconnect", nil}
 	app.Stop()
 	return nil
@@ -521,6 +685,15 @@ func handleChatPanelUp(ev *tcell.EventKey) *tcell.EventKey {
 
 func handleChatPanelDown(ev *tcell.EventKey) *tcell.EventKey {
 	return ev
+}
+
+// handlePlayMessage plays/stops the highlighted audio message. Unlike the other
+// message commands it keeps the highlight, so pressing the key again stops it.
+func handlePlayMessage(ev *tcell.EventKey) *tcell.EventKey {
+	if hls := textView.GetHighlights(); len(hls) > 0 {
+		sessionManager.CommandChannel <- messages.Command{"play", []string{hls[0]}}
+	}
+	return nil
 }
 
 func handleMessagesLast(ev *tcell.EventKey) *tcell.EventKey {
@@ -622,6 +795,9 @@ func LoadShortcuts() {
 	if err := keysMessages.Set(config.Config.Keymap.MessageShow, handleMessageCommand("show")); err != nil {
 		PrintErrorMsg("message_show:", err)
 	}
+	if err := keysMessages.Set(config.Config.Keymap.MessagePlay, handlePlayMessage); err != nil {
+		PrintErrorMsg("message_play:", err)
+	}
 	if err := keysMessages.Set(config.Config.Keymap.MessageUrl, handleMessageCommand("url")); err != nil {
 		PrintErrorMsg("message_url:", err)
 	}
@@ -646,6 +822,12 @@ func LoadShortcuts() {
 	keysChatPanel := cbind.NewConfiguration()
 	keysChatPanel.SetRune(tcell.ModCtrl, 'u', handleChatPanelUp)
 	keysChatPanel.SetRune(tcell.ModCtrl, 'd', handleChatPanelDown)
+	// chat list filters, WhatsApp-Web style tabs: 1 Todas · 2 Não lidas ·
+	// 3 Grupos · 4 Contatos; f cycles through them.
+	for i := range chatFilterNames {
+		keysChatPanel.SetRune(tcell.ModNone, rune('1'+i), handleChatFilter(i))
+	}
+	keysChatPanel.SetRune(tcell.ModNone, 'f', handleChatFilterCycle)
 	treeView.SetInputCapture(keysChatPanel.Capture)
 }
 
@@ -657,6 +839,8 @@ func PrintHelp() {
 	fmt.Fprintln(textView, "")
 	fmt.Fprintln(textView, " • [::b]Tab[::-] alterna os painéis: [::b]Conversas[::-] → [::b]Mensagens[::-] → [::b]digitação[::-].")
 	fmt.Fprintln(textView, " • Escolha uma conversa à esquerda (↑/↓ e Enter) e digite embaixo para responder.")
+	fmt.Fprintln(textView, " • Na lista: [::b]1-4[::-] filtram (Todas · Não lidas · Grupos · Contatos).")
+	fmt.Fprintln(textView, " • Áudios: clique ou selecione e pressione ["+hdr+"::b]"+config.Config.Keymap.MessagePlay+"[-::-] para tocar no terminal.")
 	fmt.Fprintln(textView, " • Pressione ["+hdr+"::b]F1[-::-] ou ["+hdr+"::b]?[-::-] a qualquer momento para o guia completo.")
 	fmt.Fprintln(textView, " • "+cmdPrefix+"connect conecta · "+cmdPrefix+"quit (ou "+config.Config.Keymap.CommandQuit+") sai.")
 	fmt.Fprintln(textView, "")
@@ -683,6 +867,11 @@ func buildHelpText() string {
 	row("F1 ou ?", "abrir/fechar esta ajuda")
 	row(k.CommandQuit, "sair do app")
 
+	sec("Lista de conversas (com a lista focada)")
+	row("1 / 2 / 3 / 4", "filtrar: Todas · Não lidas · Grupos · Contatos")
+	row("f", "alternar entre os filtros")
+	row("Enter", "abrir a conversa e ir direto para a digitação")
+
 	sec("Conversa")
 	row("Enter", "enviar a mensagem digitada")
 	row(cmdPrefix+"backlog / "+k.CommandBacklog, fmt.Sprintf("carregar %d mensagens anteriores", config.Config.General.BacklogMsgQuantity))
@@ -693,7 +882,8 @@ func buildHelpText() string {
 	row(cmdPrefix+"sendaudio <arquivo>", "enviar áudio")
 
 	sec("Painel de mensagens (selecione uma mensagem com ↑/↓)")
-	row("clique (mouse)", "em mensagem com anexo: abre no visualizador do sistema")
+	row("clique (mouse)", "áudio: toca no terminal · outros anexos: abre no sistema")
+	row(k.MessagePlay, "tocar/parar áudio ou vídeo (player: mpv/ffplay/sox/vlc)")
 	row(k.MessageDownload, "baixar anexo")
 	row(k.MessageOpen, "baixar e abrir anexo")
 	if canRenderInlineImages() {
@@ -724,7 +914,7 @@ func buildHelpText() string {
 	sec("IDs")
 	row(k.Copyuser+" ou "+cmdPrefix+"id", "copiar/mostrar o id da conversa atual (ex.: para o bot)")
 	row(k.Pasteuser, "colar o id no campo de digitação")
-	row("Ctrl+y (no 🔭)", "copiar o id da conversa destacada na busca")
+	row("Ctrl+y (na busca)", "copiar o id da conversa destacada na busca")
 
 	sec("Bot de IA (opcional)")
 	row("/ai", "(no chat) iniciar conversa com a IA — responde cada mensagem (streaming)")
@@ -752,6 +942,7 @@ func EnterCommand(key tcell.Key) {
 		return
 	}
 	if sndTxt == cmdPrefix+"quit" {
+		stopAudio()
 		sessionManager.CommandChannel <- messages.Command{"disconnect", nil}
 		app.Stop()
 		return
@@ -805,6 +996,29 @@ func GetOffsetMsgId(curId string, offset int) string {
 	} else {
 		return curRegions[len(curRegions)-1].Id
 	}
+}
+
+// redrawChat re-renders the open chat (e.g. when playback state changes).
+func redrawChat() {
+	textView.SetText(getMessagesString(curRegions))
+	if len(textView.GetHighlights()) > 0 {
+		textView.ScrollToHighlight()
+	} else {
+		textView.ScrollToEnd()
+	}
+}
+
+// queueRefreshChat re-renders the open chat from the UI goroutine; safe to call
+// from any goroutine (audio playback callbacks, session manager, …).
+func queueRefreshChat() {
+	go app.QueueUpdateDraw(redrawChat)
+}
+
+// queuePrintError prints an error from any goroutine.
+func queuePrintError(err error) {
+	go app.QueueUpdateDraw(func() {
+		PrintError(err)
+	})
 }
 
 // resets the selection in the textView and scrolls it down
@@ -934,25 +1148,70 @@ func SetDisplayedChat(wid messages.Chat) {
 	currentReceiver = wid
 	textView.Clear()
 	if wid.Name != "" {
-		textView.SetTitle(" 💬 " + wid.Name + " ")
+		textView.SetTitle(" " + wid.Name + " ")
 	} else {
 		textView.SetTitle(" Mensagens ")
 	}
 	sessionManager.CommandChannel <- messages.Command{"select", []string{currentReceiver.Id}}
 }
 
-// get a string representation of all messages for chat
+// dateSeparator renders a dim horizontal rule with the day, WhatsApp-style.
+func dateSeparator(t time.Time) string {
+	return fmt.Sprintf("[::d]──────── %s, %s ────────[::-]",
+		weekdaysPt[t.Weekday()], t.Format("02/01/2006"))
+}
+
+// msgDay returns the calendar day of a message, used to place date separators.
+func msgDay(msg *messages.Message) string {
+	return time.Unix(int64(msg.Timestamp), 0).Format("2006-01-02")
+}
+
+// get a string representation of all messages for chat, with a date separator
+// every time the calendar day changes.
 func getMessagesString(msgs []messages.Message) string {
 	out := ""
+	lastDay := ""
 	for _, msg := range msgs {
+		if day := msgDay(&msg); day != lastDay {
+			out += dateSeparator(time.Unix(int64(msg.Timestamp), 0)) + "\n"
+			lastDay = day
+		}
 		out += getTextMessageString(&msg)
 		out += "\n"
 	}
 	return out
 }
 
+// formatDuration renders seconds as m:ss for audio/video lengths.
+func formatDuration(secs uint32) string {
+	return fmt.Sprintf("%d:%02d", secs/60, secs%60)
+}
+
+// mediaHint returns the dim usage hint appended to attachment messages.
+func mediaHint(msg *messages.Message) string {
+	k := config.Config.Keymap
+	switch msg.Kind {
+	case messages.MessageKindAudio:
+		hint := k.MessagePlay + "/clique toca · " + k.MessageOpen + " abre"
+		if msg.DurationSecs > 0 {
+			hint = formatDuration(msg.DurationSecs) + " · " + hint
+		}
+		return hint
+	case messages.MessageKindVideo:
+		hint := k.MessagePlay + " toca · " + k.MessageOpen + "/clique abre"
+		if msg.DurationSecs > 0 {
+			hint = formatDuration(msg.DurationSecs) + " · " + hint
+		}
+		return hint
+	case messages.MessageKindImage:
+		return k.MessageShow + " exibe · " + k.MessageOpen + "/clique abre"
+	case messages.MessageKindDocument:
+		return k.MessageOpen + "/clique abre"
+	}
+	return ""
+}
+
 // create a formatted string with regions based on message ID from a text message
-// TODO: optimize, use Sprintf etc
 func getTextMessageString(msg *messages.Message) string {
 	colorMe := config.Config.Colors.ChatMe
 	colorContact := config.Config.Colors.ChatContact
@@ -961,20 +1220,20 @@ func getTextMessageString(msg *messages.Message) string {
 	if msg.Forwarded {
 		text = "[" + config.Config.Colors.ForwardedText + "]" + text + "[-]"
 	}
-	tim := time.Unix(int64(msg.Timestamp), 0)
-	time := tim.Format("02-01-06 15:04:05")
+	timeStr := time.Unix(int64(msg.Timestamp), 0).Format("15:04")
 	out += "[\""
 	out += msg.Id
 	out += "\"]"
 	if msg.FromMe { //msg from me
-		out += "[-::d](" + time + ") [" + colorMe + "::b]Me: [-::-]" + text
+		out += "[-::d]" + timeStr + "[-::-] [" + colorMe + "::b]Eu[-::-] " + text
 	} else { // message from others
-		out += "[-::d](" + time + ") [" + colorContact + "::b]" + msg.ContactShort + ": [-::-]" + text
+		out += "[-::d]" + timeStr + "[-::-] [" + colorContact + "::b]" + tview.Escape(msg.ContactShort) + "[-::-] " + text
 	}
-	switch msg.Kind {
-	case messages.MessageKindImage, messages.MessageKindVideo,
-		messages.MessageKindAudio, messages.MessageKindDocument:
-		out += " [::d](clique para abrir)[::-]"
+	if hint := mediaHint(msg); hint != "" {
+		out += " [::d](" + hint + ")[::-]"
+	}
+	if msg.Id != "" && msg.Id == currentPlayingMsgId() {
+		out += " [" + config.Config.Colors.Positive + "::b]▶ tocando[-::-] [::d](" + config.Config.Keymap.MessagePlay + " para)[::-]"
 	}
 	// an already-rendered image lives inside the message region, so clicking
 	// the picture itself also opens the native viewer
@@ -991,6 +1250,10 @@ func (u UiHandler) NewMessage(msg messages.Message) {
 	//TODO: its stupid to "go" this as its supposed to run
 	//on the ui thread anyway. But QueueUpdate blocks...?
 	go app.QueueUpdateDraw(func() {
+		// emit a date separator when the incoming message starts a new day
+		if len(curRegions) == 0 || msgDay(&curRegions[len(curRegions)-1]) != msgDay(&msg) {
+			PrintText(dateSeparator(time.Unix(int64(msg.Timestamp), 0)))
+		}
 		curRegions = append(curRegions, msg)
 		PrintText(getTextMessageString(&msg))
 		maybeAutoShowImage(msg)
@@ -1013,89 +1276,12 @@ func (u UiHandler) NewScreen(msgs []messages.Message) {
 	})
 }
 
-// loads the chat data from storage to the TreeView
+// loads the chat data from storage to the chat list; ids already come sorted
+// by most recent message first.
 func (u UiHandler) SetChats(ids []messages.Chat) {
 	go app.QueueUpdateDraw(func() {
-		allChats = ids // keep the full list for the finder (Ctrl+f)
-		chatRoot.ClearChildren()
-		oldId := currentReceiver.Id
-
-		headerColor := tcell.ColorNames[config.Config.Colors.ListHeader]
-		recentsNode := tview.NewTreeNode("🕐 Recentes").SetColor(headerColor).SetSelectable(true)
-		groupsNode := tview.NewTreeNode("👥 Grupos").SetColor(headerColor).SetSelectable(true)
-		contactsNode := tview.NewTreeNode("👤 Contatos").SetColor(headerColor).SetSelectable(true)
-
-		var selectedNode *tview.TreeNode
-		makeNode := func(element messages.Chat) *tview.TreeNode {
-			raw := strings.TrimSuffix(strings.TrimSuffix(element.Id, messages.GROUPSUFFIX), messages.CONTACTSUFFIX)
-			label := element.Name
-			isNumber := false
-			if label == "" {
-				label = raw
-				isNumber = true
-			}
-			// WhatsApp-style: clearly mark whether this is a group or a 1:1 contact
-			icon := "👤 "
-			if element.IsGroup {
-				icon = "👥 "
-			} else if isNumber {
-				label = "+" + label // a bare JID is a phone number
-			}
-			name := icon + label
-			if element.Unread > 0 {
-				name += " [" + config.Config.Colors.UnreadCount + "::b](" + fmt.Sprint(element.Unread) + ")[-::-]"
-			}
-			node := tview.NewTreeNode(name).
-				SetReference(element).
-				SetSelectable(true)
-			if element.IsGroup {
-				node.SetColor(tcell.ColorNames[config.Config.Colors.ListGroup])
-			} else {
-				node.SetColor(tcell.ColorNames[config.Config.Colors.ListContact])
-			}
-			// store new currentReceiver, else the selection on the left goes off
-			if element.Id == oldId {
-				currentReceiver = element
-			}
-			// prefer the first node created for the chat (the "Recentes" entry)
-			if selectedNode == nil && element.Id == currentReceiver.Id {
-				selectedNode = node
-			}
-			return node
-		}
-
-		// "Recentes": the 10 most recently active chats; ids already come sorted
-		// by most recent first, chats without activity have LastMessage == 0.
-		for _, element := range ids {
-			if len(recentsNode.GetChildren()) >= 10 {
-				break
-			}
-			if element.LastMessage == 0 {
-				continue
-			}
-			recentsNode.AddChild(makeNode(element))
-		}
-		for _, element := range ids {
-			if element.IsGroup {
-				groupsNode.AddChild(makeNode(element))
-			} else {
-				contactsNode.AddChild(makeNode(element))
-			}
-		}
-
-		// only show a category header if it actually has entries
-		if len(recentsNode.GetChildren()) > 0 {
-			chatRoot.AddChild(recentsNode)
-		}
-		if len(groupsNode.GetChildren()) > 0 {
-			chatRoot.AddChild(groupsNode)
-		}
-		if len(contactsNode.GetChildren()) > 0 {
-			chatRoot.AddChild(contactsNode)
-		}
-		if selectedNode != nil {
-			treeView.SetCurrentNode(selectedNode)
-		}
+		allChats = ids // keep the full list for the finder (Ctrl+f) and filters
+		rebuildChatTree()
 	})
 }
 
@@ -1114,6 +1300,10 @@ func (u UiHandler) PrintFile(path string, msgId string) {
 		}
 		PrintImage(path)
 	})
+}
+
+func (u UiHandler) PlayFile(path string, msgId string) {
+	playAudioFile(path, msgId)
 }
 
 func (u UiHandler) OpenFile(path string) {

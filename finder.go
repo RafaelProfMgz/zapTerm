@@ -150,9 +150,9 @@ func copyFinderSelection() {
 	}
 	id := finderResults[idx].Id
 	if err := safeWriteClipboard(id); err != nil {
-		finderInput.SetTitle(" 🔭 clipboard indisponível — id: " + id + " ")
+		finderInput.SetTitle(" Buscar · clipboard indisponível — id: " + id + " ")
 	} else {
-		finderInput.SetTitle(" 🔭 ✓ copiado: " + id + " ")
+		finderInput.SetTitle(" Buscar · ✓ copiado: " + id + " ")
 	}
 }
 
@@ -222,23 +222,22 @@ func refreshFinder() {
 	for _, m := range matches {
 		c := m.chat
 		raw := rawJid(c.Id)
-		icon := "👤 "
-		if c.IsGroup {
-			icon = "👥 "
-		}
 		label := c.Name
 		if label == "" {
 			label = "+" + raw
 		}
-		if c.Unread > 0 {
-			label += fmt.Sprintf("  (%d)", c.Unread)
+		if c.IsGroup {
+			label = "# " + label // minimal group marker, no emoji icons
 		}
-		finderList.AddItem(icon+label, raw, 0, nil)
+		if c.Unread > 0 {
+			label += fmt.Sprintf("  %d●", c.Unread)
+		}
+		finderList.AddItem(label, raw, 0, nil)
 		finderResults = append(finderResults, c)
 	}
 
 	finderInput.SetTitle(fmt.Sprintf(
-		" 🔭 %s (Tab) · ↑/↓ · Enter abre · Ctrl+y copia id · Esc — %d resultado(s) ",
+		" Buscar · %s (Tab) · ↑/↓ · Enter abre · Ctrl+y copia id · Esc — %d resultado(s) ",
 		scopeNames[finderScope], len(finderResults),
 	))
 }

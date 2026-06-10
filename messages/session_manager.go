@@ -427,6 +427,8 @@ func (sm *SessionManager) execCommand(command Command) {
 		sm.downloadCommand(command.Params, true, false)
 	case "show":
 		sm.downloadCommand(command.Params, true, true)
+	case "play":
+		sm.playCommand(command.Params)
 	case "url":
 		sm.openMessageURL(command.Params)
 	case "upload":
@@ -648,6 +650,32 @@ func (sm *SessionManager) downloadCommand(params []string, preview, show bool) {
 		return
 	}
 	sm.uiHandler.PrintText("[::d] -> " + path + "[::-]")
+}
+
+// playCommand downloads an audio (or video) message and hands it to the UI's
+// audio player; non-playable attachments fall back to the system viewer.
+func (sm *SessionManager) playCommand(params []string) {
+	if !checkParam(params, 1) {
+		sm.printCommandUsage("play", "[message-id[]")
+		return
+	}
+	msg, ok := sm.db.GetMessage(params[0])
+	if !ok {
+		sm.uiHandler.PrintError(errors.New("message not found"))
+		return
+	}
+	switch msg.Kind {
+	case MessageKindAudio, MessageKindVideo:
+	default:
+		sm.uiHandler.PrintError(errors.New("play only works for audio/video messages"))
+		return
+	}
+	path, err := sm.downloadMessage(msg, true)
+	if err != nil {
+		sm.uiHandler.PrintError(err)
+		return
+	}
+	sm.uiHandler.PlayFile(path, msg.Id)
 }
 
 func (sm *SessionManager) openMessageURL(params []string) {
@@ -1177,6 +1205,7 @@ func (eh *eventHandler) messageFromInfo(info types.MessageInfo, raw *waProto.Mes
 		video := raw.GetVideoMessage()
 		msg.Kind = MessageKindVideo
 		msg.MimeType = video.GetMimetype()
+		msg.DurationSecs = video.GetSeconds()
 		msg.Text = mediaDisplayText(MessageKindVideo, "", video.GetCaption())
 		msg.Forwarded = video.GetContextInfo().GetIsForwarded()
 		return msg, true
@@ -1184,6 +1213,7 @@ func (eh *eventHandler) messageFromInfo(info types.MessageInfo, raw *waProto.Mes
 		audio := raw.GetAudioMessage()
 		msg.Kind = MessageKindAudio
 		msg.MimeType = audio.GetMimetype()
+		msg.DurationSecs = audio.GetSeconds()
 		msg.Text = mediaDisplayText(MessageKindAudio, "", "")
 		msg.Forwarded = audio.GetContextInfo().GetIsForwarded()
 		return msg, true
@@ -1375,16 +1405,16 @@ func commandNameForKind(kind MessageKind) string {
 }
 
 func mediaDisplayText(kind MessageKind, fileName, caption string) string {
-	label := "[FILE]"
+	label := "[arquivo]"
 	switch kind {
 	case MessageKindImage:
-		label = "[IMAGE]"
+		label = "[imagem]"
 	case MessageKindVideo:
-		label = "[VIDEO]"
+		label = "[vídeo]"
 	case MessageKindAudio:
-		label = "[AUDIO]"
+		label = "[áudio]"
 	case MessageKindDocument:
-		label = "[DOCUMENT]"
+		label = "[documento]"
 	}
 	parts := []string{label}
 	if fileName != "" && kind == MessageKindDocument {

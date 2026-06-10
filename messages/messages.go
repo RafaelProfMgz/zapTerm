@@ -1,4 +1,4 @@
-//this package manages the messages
+// this package manages the messages
 package messages
 
 import (
@@ -17,6 +17,9 @@ type UiMessageHandler interface {
 	// PrintFile displays a downloaded image in the message panel; msgId ties the
 	// rendered image to its message (empty when there is no originating message).
 	PrintFile(path string, msgId string)
+	// PlayFile plays a downloaded audio file; msgId ties the playback state to
+	// its message so playing the same message again stops it (toggle).
+	PlayFile(path string, msgId string)
 	SetStatus(SessionStatus)
 	OpenFile(string)
 	GetWriter() io.Writer
@@ -76,6 +79,8 @@ type Message struct {
 	Kind         MessageKind
 	MimeType     string
 	FileName     string
+	// DurationSecs is the media length in seconds (audio/video), 0 if unknown.
+	DurationSecs uint32
 	Unread       bool
 	RawMessage   *waProto.Message
 }

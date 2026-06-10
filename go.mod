@@ -8,6 +8,7 @@ require (
 	github.com/gdamore/tcell/v2 v2.3.11
 	github.com/gen2brain/beeep v0.0.0-20210529141713-5586760f0cc1
 	github.com/mattn/go-colorable v0.1.14
+	github.com/mattn/go-runewidth v0.0.13
 	github.com/mattn/go-sqlite3 v1.14.34
 	github.com/rivo/tview v0.0.0-20210608105643-d4fb0348227b
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
@@ -31,7 +32,6 @@ require (
 	github.com/gopherjs/gopherwasm v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-runewidth v0.0.13 // indirect
 	github.com/nu7hatch/gouuid v0.0.0-20131221200532-179d4d0c4d8d // indirect
 	github.com/petermattis/goid v0.0.0-20260113132338-7c7de50cc741 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect

@@ -14,6 +14,12 @@
 - Envia e recebe mensagens de WhatsApp dentro de um app de terminal
 - Conecta pela API do WhatsApp Web, sem precisar de navegador
 - Login simples por QR Code
+- Lista de conversas estilo WhatsApp Web: ordenada por atividade, com horário da
+  última mensagem e contador de não lidas; filtros **1-4** (Todas · Não lidas ·
+  Grupos · Contatos)
+- **Toca áudios no terminal** (clique ou tecla `p`) — usa mpv/ffplay/sox/vlc,
+  configurável via `audio_command`
+- Separadores de data no histórico, visual minimalista sem ícones (estilo lazyvim)
 - Baixa e abre anexos (imagem, vídeo, áudio, documento)
 - Envia imagens, vídeos, áudios e documentos
 - Gerenciamento básico de grupos
