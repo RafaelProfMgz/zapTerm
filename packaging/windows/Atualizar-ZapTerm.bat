@@ -13,7 +13,7 @@ REM  de ambiente ZAPTERM_REPO=usuario/repo antes de rodar.
 REM ============================================================
 setlocal
 set "ZAP_DIR=%~dp0"
-if "%ZAPTERM_REPO%"=="" set "ZAPTERM_REPO=RafaelProfMgz/whatscli"
+if "%ZAPTERM_REPO%"=="" set "ZAPTERM_REPO=RafaelProfMgz/zapTerm"
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop';" ^
