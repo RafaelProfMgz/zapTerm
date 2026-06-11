@@ -56,6 +56,7 @@ Quatro telas, seguindo os mockups de `design/`:
 | `Tab` | alterna painéis (conversas → mensagens → digitação) |
 | `↑/↓` | navegar / rolar logs |
 | `Enter` | abrir conversa / enviar mensagem / tocar áudio selecionado |
+| `Ctrl+F` | buscador de contatos (nome ou número; `Tab` alterna Todos · Contatos · Grupos) |
 | `1-4` / `f` | filtros: Todas · Não lidas · Grupos · Contatos |
 | `p` / `o` / `d` | tocar áudio · abrir anexo · baixar (mensagem selecionada) |
 | `b` | carregar histórico (backlog) |

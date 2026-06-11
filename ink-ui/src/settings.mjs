@@ -87,6 +87,7 @@ export default function SettingsScreen({version, status, binPath, height}) {
         h(Key, {key: 'tab', k: 'TAB', action: 'alterna painéis (conversas → mensagens → digitação)'}),
         h(Key, {key: 'nav', k: '↑/↓', action: 'navegar / rolar logs'}),
         h(Key, {key: 'ent', k: 'ENTER', action: 'abrir conversa · enviar mensagem · tocar áudio'}),
+        h(Key, {key: 'find', k: 'CTRL+F', action: 'buscar contato por nome ou número (TAB alterna escopo)'}),
         h(Key, {key: 'fil', k: '1-4 / F', action: 'filtros de conversa: todas · não lidas · grupos · contatos'}),
         h(Key, {key: 'pod', k: 'P/O/D', action: 'tocar áudio · abrir anexo · baixar (mensagem selecionada)'}),
         h(Key, {key: 'b', k: 'B', action: 'carregar histórico (backlog)'}),

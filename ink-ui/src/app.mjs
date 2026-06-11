@@ -4,6 +4,7 @@ import {TextInput} from '@inkjs/ui';
 import {createBridge} from './bridge.mjs';
 import theme from './theme.mjs';
 import ChatList, {FILTERS, filterChats, chatRows, rowScrollStart} from './chatlist.mjs';
+import Finder, {FINDER_SCOPES, searchChats} from './finder.mjs';
 import Messages from './messages.mjs';
 import TunnelScreen from './tunnel.mjs';
 import LogsScreen from './logs.mjs';
@@ -119,6 +120,11 @@ export default function App({mouse}) {
   const [selMsg, setSelMsg] = useState(null);
   const [logScroll, setLogScroll] = useState(0);
   const [inputKey, setInputKey] = useState(0); // remonta o TextInput p/ limpar
+  const [finderOpen, setFinderOpen] = useState(false);
+  const [finderQuery, setFinderQuery] = useState('');
+  const [finderScope, setFinderScope] = useState(0);
+  const [finderSel, setFinderSel] = useState(0);
+  const [finderKey, setFinderKey] = useState(0); // remonta o campo de busca p/ limpar
 
   const currentChatRef = useRef(null);
   currentChatRef.current = currentChat;
@@ -164,6 +170,11 @@ export default function App({mouse}) {
 
   const visibleChats = useMemo(() => filterChats(chats, filter), [chats, filter]);
 
+  // o finder busca em todas as conversas, ignorando o filtro da lista lateral
+  const finderResults = useMemo(
+    () => (finderOpen ? searchChats(chats, finderQuery, finderScope) : []),
+    [finderOpen, chats, finderQuery, finderScope]);
+
   const openChat = chat => {
     if (!chat) return;
     setCurrentChat(chat);
@@ -175,6 +186,26 @@ export default function App({mouse}) {
   const sendMessageCmd = cmd => {
     if (selMsg == null || !msgs[selMsg]) return;
     bridge.send(cmd, [msgs[selMsg].id]);
+  };
+
+  const openFinder = () => {
+    setFinderOpen(true);
+    setFinderQuery('');
+    setFinderScope(0);
+    setFinderSel(0);
+    setFinderKey(k => k + 1); // limpa a busca anterior
+  };
+
+  // openFinderSelection abre o resultado destacado, sincroniza a seleção da
+  // lista lateral (se a conversa estiver no filtro atual) e foca a digitação.
+  const openFinderSelection = () => {
+    const chat = finderResults[Math.max(0, Math.min(finderSel, finderResults.length - 1))];
+    setFinderOpen(false);
+    if (!chat) return;
+    const idx = visibleChats.findIndex(c => c.id === chat.id);
+    if (idx >= 0) setSelChat(idx);
+    openChat(chat);
+    setFocus('input');
   };
 
   useFKeys(n => {
@@ -196,6 +227,20 @@ export default function App({mouse}) {
       if (key.escape) setScreen('session');
       return;
     }
+    if (finderOpen) {
+      // navegação do finder; Enter é tratado pelo onSubmit do campo de busca
+      if (key.escape || (key.ctrl && input === 'f')) { setFinderOpen(false); return; }
+      if (key.upArrow) { setFinderSel(s => Math.max(0, s - 1)); return; }
+      if (key.downArrow) { setFinderSel(s => Math.min(Math.max(0, finderResults.length - 1), s + 1)); return; }
+      if (key.tab) {
+        const n = FINDER_SCOPES.length;
+        setFinderScope(sc => (sc + (key.shift ? n - 1 : 1)) % n);
+        setFinderSel(0);
+        return;
+      }
+      return; // o resto das teclas vai para o campo de busca
+    }
+    if (key.ctrl && input === 'f') { openFinder(); return; }
     if (key.tab) {
       setFocus(f => FOCUS_ORDER[(FOCUS_ORDER.indexOf(f) + 1) % FOCUS_ORDER.length]);
       return;
@@ -254,6 +299,13 @@ export default function App({mouse}) {
       return;
     }
     if (screen !== 'session') return;
+    if (finderOpen) {
+      // com o finder aberto, a roda navega os resultados; cliques ficam de fora
+      if (type === 'wheel') {
+        setFinderSel(s => Math.max(0, Math.min(Math.max(0, finderResults.length - 1), s + dy)));
+      }
+      return;
+    }
     const bodyTop = 3; // linha 1 = cabeçalho, linha 2 = borda
     const bodyBottom = 2 + sessionHeight;
     if (y >= bodyTop && y <= bodyBottom) {
@@ -304,24 +356,37 @@ export default function App({mouse}) {
   } else {
     body = h(Box, {flexDirection: 'column', height: innerHeight},
       h(Box, {flexGrow: 1},
-        h(ChatList, {
-          chats: visibleChats,
-          filter,
-          selected: selChat,
-          currentId: currentChat?.id,
-          focused: focus === 'chats',
-          height: sessionHeight,
-          width: SIDEBAR_WIDTH,
-        }),
-        h(Messages, {
-          msgs,
-          log,
-          chatName: currentChat?.name,
-          selected: selMsg,
-          playingId,
-          focused: focus === 'messages',
-          height: sessionHeight,
-        }),
+        finderOpen
+          ? h(Finder, {
+            results: finderResults,
+            scope: finderScope,
+            selected: finderSel,
+            height: sessionHeight,
+            width: Math.max(30, Math.min(72, cols - 8)),
+            inputKey: finderKey,
+            onChange: v => { setFinderQuery(v); setFinderSel(0); },
+            onSubmit: openFinderSelection,
+          })
+          : h(React.Fragment, null,
+            h(ChatList, {
+              chats: visibleChats,
+              filter,
+              selected: selChat,
+              currentId: currentChat?.id,
+              focused: focus === 'chats',
+              height: sessionHeight,
+              width: SIDEBAR_WIDTH,
+            }),
+            h(Messages, {
+              msgs,
+              log,
+              chatName: currentChat?.name,
+              selected: selMsg,
+              playingId,
+              focused: focus === 'messages',
+              height: sessionHeight,
+            }),
+          ),
       ),
       // prompt de entrada
       h(Box, {
@@ -332,14 +397,14 @@ export default function App({mouse}) {
         h(Text, {color: theme.primary, bold: true}, 'você@zapterm:~$ '),
         h(TextInput, {
           key: inputKey,
-          isDisabled: focus !== 'input',
+          isDisabled: focus !== 'input' || finderOpen,
           placeholder: 'digite_mensagem_ou_comando…',
           onSubmit,
         }),
       ),
       h(Box, {paddingX: 1},
         h(Text, {color: theme.textDim, dimColor: true, wrap: 'truncate'},
-          '[TAB] painel · [↑/↓] navegar · [ENTER] abrir/enviar · [1-4] filtros · [P] áudio · [O] abrir · [D] baixar · [B] histórico · mouse: clique/rolagem'),
+          '[TAB] painel · [↑/↓] navegar · [ENTER] abrir/enviar · [CTRL+F] buscar · [1-4] filtros · [P] áudio · [O] abrir · [D] baixar · [B] histórico · mouse: clique/rolagem'),
       ),
     );
   }
