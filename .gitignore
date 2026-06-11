@@ -7,3 +7,5 @@ dist/
 
 # ink-ui (frontend experimental Node)
 ink-ui/node_modules/
+
+design/

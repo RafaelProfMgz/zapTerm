@@ -1,15 +1,69 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {Box, Text, useApp, useInput, useStdout} from 'ink';
+import {Box, Text, useApp, useInput, useStdin, useStdout} from 'ink';
 import {TextInput} from '@inkjs/ui';
 import {createBridge} from './bridge.mjs';
 import theme from './theme.mjs';
 import ChatList, {FILTERS, filterChats} from './chatlist.mjs';
 import Messages from './messages.mjs';
+import TunnelScreen from './tunnel.mjs';
+import LogsScreen from './logs.mjs';
+import SettingsScreen from './settings.mjs';
 
 const h = React.createElement;
 
 const SIDEBAR_WIDTH = 34;
 const FOCUS_ORDER = ['chats', 'messages', 'input'];
+
+const SCREENS = [
+  {id: 'session', label: 'SESSÃO'},
+  {id: 'tunnel', label: 'TÚNEL'},
+  {id: 'logs', label: 'LOGS'},
+  {id: 'settings', label: 'CONFIG'},
+];
+
+// O useInput do Ink não distingue teclas F (chegam como input vazio), então
+// escutamos o stdin cru e casamos as sequências clássicas de F1-F4.
+const FKEY_SEQS = {
+  '\x1bOP': 1, '\x1b[11~': 1, '\x1b[[A': 1,
+  '\x1bOQ': 2, '\x1b[12~': 2, '\x1b[[B': 2,
+  '\x1bOR': 3, '\x1b[13~': 3, '\x1b[[C': 3,
+  '\x1bOS': 4, '\x1b[14~': 4, '\x1b[[D': 4,
+};
+
+function useFKeys(onFKey) {
+  const {stdin} = useStdin();
+  const ref = useRef(onFKey);
+  ref.current = onFKey;
+  useEffect(() => {
+    if (!stdin) return;
+    const onData = data => {
+      const n = FKEY_SEQS[String(data)];
+      if (n) ref.current(n);
+    };
+    stdin.on('data', onData);
+    return () => { stdin.off('data', onData); };
+  }, [stdin]);
+}
+
+function nowStamp() {
+  return new Date().toTimeString().slice(0, 8);
+}
+
+// NavTabs: abas do cabeçalho (SESSÃO TÚNEL LOGS CONFIG) — a ativa invertida
+// em âmbar, como o item ativo da nav do design.
+function NavTabs({screen}) {
+  return h(Text, null,
+    ...SCREENS.map((s, i) => h(Text, {key: s.id},
+      i > 0 ? h(Text, {color: theme.outlineDim}, ' ') : null,
+      h(Text, {
+        color: s.id === screen ? theme.onPrimary : theme.textDim,
+        backgroundColor: s.id === screen ? theme.primary : undefined,
+        bold: s.id === screen,
+        dimColor: s.id !== screen,
+      }, ` ${s.label} `),
+    )),
+  );
+}
 
 export default function App() {
   const {exit} = useApp();
@@ -18,22 +72,27 @@ export default function App() {
   const bridge = useMemo(() => createBridge(), []);
   const [chats, setChats] = useState([]);
   const [msgs, setMsgs] = useState([]);
-  const [log, setLog] = useState([{kind: 'text', text: 'iniciando o núcleo Go…'}]);
+  const [log, setLog] = useState([{kind: 'text', text: 'iniciando o núcleo Go…', stamp: nowStamp()}]);
   const [status, setStatus] = useState({connected: false, lastSeen: ''});
+  const [version, setVersion] = useState('');
   const [currentChat, setCurrentChat] = useState(null);
   const [playingId, setPlayingId] = useState('');
+  const [screen, setScreen] = useState('session');
   const [focus, setFocus] = useState('chats');
   const [filter, setFilter] = useState(0);
   const [selChat, setSelChat] = useState(0);
   const [selMsg, setSelMsg] = useState(null);
+  const [logScroll, setLogScroll] = useState(0);
   const [inputKey, setInputKey] = useState(0); // remonta o TextInput p/ limpar
 
   const currentChatRef = useRef(null);
   currentChatRef.current = currentChat;
+  const connRef = useRef(false); // detecta transição de conexão p/ logar no feed
 
   useEffect(() => {
     const pushLog = (kind, text) =>
-      setLog(l => [...l.slice(-300), {kind, text}]);
+      setLog(l => [...l.slice(-300), {kind, text, stamp: nowStamp()}]);
+    bridge.on('ready', e => setVersion(e.version || ''));
     bridge.on('chats', e => setChats(e.chats || []));
     bridge.on('screen', e => { setMsgs(e.messages || []); setSelMsg(null); });
     bridge.on('message', e => {
@@ -41,12 +100,22 @@ export default function App() {
         setMsgs(m => [...m, e.message]);
       }
     });
-    bridge.on('status', e => setStatus({connected: !!e.connected, lastSeen: e.lastSeen || ''}));
+    bridge.on('status', e => {
+      const connected = !!e.connected;
+      if (connRef.current !== connected) {
+        connRef.current = connected;
+        pushLog('net', connected
+          ? '[TÚNEL_ESTABELECIDO] conexão estável.'
+          : '[TÚNEL_PERDIDO] aguardando reconexão…');
+      }
+      setStatus({connected, lastSeen: e.lastSeen || ''});
+    });
     bridge.on('playing', e => setPlayingId(e.msgId || ''));
     bridge.on('text', e => pushLog('text', e.text));
     bridge.on('error', e => pushLog('error', e.text));
     bridge.on('file', e => pushLog('text', `arquivo salvo: ${e.path}`));
     bridge.on('exit', () => exit());
+    bridge.start(); // listeners prontos: descarrega eventos chegados cedo
     return () => bridge.quit();
   }, [bridge, exit]);
 
@@ -65,8 +134,25 @@ export default function App() {
     bridge.send(cmd, [msgs[selMsg].id]);
   };
 
+  useFKeys(n => {
+    setScreen(SCREENS[n - 1].id);
+    setLogScroll(0);
+  });
+
   useInput((input, key) => {
     if (key.ctrl && input === 'q') { bridge.quit(); exit(); return; }
+    if (screen !== 'session') {
+      // fora da sessão: 1-4 também troca de tela; ↑/↓ rola os logs
+      if (input >= '1' && input <= '4') { setScreen(SCREENS[Number(input) - 1].id); setLogScroll(0); return; }
+      if (screen === 'logs') {
+        if (key.upArrow) setLogScroll(s => Math.min(log.length, s + 1));
+        else if (key.downArrow) setLogScroll(s => Math.max(0, s - 1));
+        else if (key.pageUp) setLogScroll(s => Math.min(log.length, s + 10));
+        else if (key.pageDown) setLogScroll(s => Math.max(0, s - 10));
+      }
+      if (key.escape) setScreen('session');
+      return;
+    }
     if (key.tab) {
       setFocus(f => FOCUS_ORDER[(FOCUS_ORDER.indexOf(f) + 1) % FOCUS_ORDER.length]);
       return;
@@ -103,58 +189,101 @@ export default function App() {
   };
 
   const rows = stdout?.rows || 30;
-  const innerHeight = rows - 5; // header + input + hint
+  const innerHeight = rows - 4; // cabeçalho (2) + taskbar (2)
+  const sessionHeight = innerHeight - 4; // prompt (3) + linha de dicas (1)
+
+  let body;
+  if (screen === 'tunnel') {
+    body = h(TunnelScreen, {status, chats, version, log, height: innerHeight});
+  } else if (screen === 'logs') {
+    body = h(LogsScreen, {log, status, scroll: logScroll, height: innerHeight});
+  } else if (screen === 'settings') {
+    body = h(SettingsScreen, {version, status, binPath: bridge.bin, height: innerHeight});
+  } else {
+    body = h(Box, {flexDirection: 'column', height: innerHeight},
+      h(Box, {flexGrow: 1},
+        h(ChatList, {
+          chats: visibleChats,
+          filter,
+          selected: selChat,
+          currentId: currentChat?.id,
+          focused: focus === 'chats',
+          height: sessionHeight,
+          width: SIDEBAR_WIDTH,
+        }),
+        h(Messages, {
+          msgs,
+          log,
+          chatName: currentChat?.name,
+          selected: selMsg,
+          playingId,
+          focused: focus === 'messages',
+          height: sessionHeight,
+        }),
+      ),
+      // prompt de entrada
+      h(Box, {
+        borderStyle: 'single',
+        borderColor: focus === 'input' ? theme.primary : theme.outlineDim,
+        paddingX: 1,
+      },
+        h(Text, {color: theme.primary, bold: true}, 'você@zapterm:~$ '),
+        h(TextInput, {
+          key: inputKey,
+          isDisabled: focus !== 'input',
+          placeholder: 'digite_mensagem_ou_comando…',
+          onSubmit,
+        }),
+      ),
+      h(Box, {paddingX: 1},
+        h(Text, {color: theme.textDim, dimColor: true, wrap: 'truncate'},
+          '[TAB] painel · [↑/↓] navegar · [ENTER] abrir/enviar · [1-4] filtros · [P] áudio · [O] abrir · [D] baixar · [B] histórico'),
+      ),
+    );
+  }
 
   return h(Box, {flexDirection: 'column', height: rows},
-    // header
-    h(Box, {justifyContent: 'space-between', paddingX: 1},
-      h(Text, null,
-        h(Text, {color: theme.accent, bold: true}, 'ZAPTERM'),
-        h(Text, {color: theme.clay}, ' — ink ui experimental · núcleo Go'),
+    // cabeçalho: título do protocolo + abas de navegação
+    h(Box, {
+      justifyContent: 'space-between',
+      paddingX: 1,
+      borderStyle: 'single',
+      borderColor: theme.outlineDim,
+      borderTop: false, borderLeft: false, borderRight: false,
+    },
+      h(Text, {wrap: 'truncate'},
+        h(Text, {color: theme.primary, bold: true}, 'ZAPTERM PROTOCOL'),
+        h(Text, {color: theme.secondary}, version ? ` ${version}` : ''),
+        h(Text, {color: theme.outlineDim}, ' — '),
+        h(Text, {color: status.connected ? theme.textDim : theme.error},
+          status.connected ? 'CONEXÃO CRIPTOGRAFADA' : 'SEM CONEXÃO'),
       ),
-      h(Text, {color: status.connected ? theme.accent : theme.danger, bold: true},
-        status.connected ? '[ONLINE]' : '[OFFLINE]'),
+      h(NavTabs, {screen}),
     ),
-    // corpo: sidebar + mensagens
-    h(Box, {flexGrow: 1, height: innerHeight},
-      h(ChatList, {
-        chats: visibleChats,
-        filter,
-        selected: selChat,
-        currentId: currentChat?.id,
-        focused: focus === 'chats',
-        height: innerHeight,
-        width: SIDEBAR_WIDTH,
-      }),
-      h(Messages, {
-        msgs,
-        log,
-        chatName: currentChat?.name,
-        selected: selMsg,
-        playingId,
-        focused: focus === 'messages',
-        height: innerHeight,
-      }),
-    ),
-    // input estilo prompt
-    h(Box, {borderStyle: 'single', borderColor: focus === 'input' ? theme.accent : theme.clayDark, paddingX: 1},
-      h(Text, {color: theme.green, bold: true}, 'você@zapterm:~$ '),
-      h(TextInput, {
-        key: inputKey,
-        isDisabled: focus !== 'input',
-        placeholder: 'digite_mensagem_ou_comando…',
-        onSubmit,
-      }),
-    ),
-    // hint bar
-    h(Box, {paddingX: 1},
-      h(Text, {color: theme.clay},
-        h(Text, {color: theme.danger, bold: true}, '[CTRL+Q]'), ' sair  ',
-        h(Text, {color: theme.sage, bold: true}, '[TAB]'), ' painel  ',
-        h(Text, {color: theme.sage, bold: true}, '[1-4]'), ' filtrar  ',
-        h(Text, {color: theme.sage, bold: true}, '[↑/↓]'), ' navegar  ',
-        h(Text, {color: theme.sage, bold: true}, '[P]'), ' áudio  ',
-        h(Text, {color: theme.sage, bold: true}, '[B]'), ' histórico',
+    body,
+    // taskbar
+    h(Box, {
+      justifyContent: 'space-between',
+      paddingX: 1,
+      borderStyle: 'single',
+      borderColor: theme.outlineDim,
+      borderBottom: false, borderLeft: false, borderRight: false,
+    },
+      h(Text, {wrap: 'truncate'},
+        h(Text, {color: theme.primaryDim}, screen === 'session' ? 'SESSÃO_ATIVA' : 'MODO_DIAGNÓSTICO'),
+        h(Text, null, '  '),
+        ...SCREENS.map((s, i) => h(Text, {key: s.id},
+          h(Text, {
+            color: s.id === screen ? theme.onPrimary : theme.secondary,
+            backgroundColor: s.id === screen ? theme.primary : undefined,
+          }, `[F${i + 1}] ${s.label}`),
+          i < SCREENS.length - 1 ? h(Text, null, ' ') : null,
+        )),
+      ),
+      h(Text, null,
+        h(Text, {color: status.connected ? theme.tertiary : theme.error, bold: true},
+          status.connected ? '[ONLINE]' : '[OFFLINE]'),
+        h(Text, {color: theme.error}, '  [CTRL+Q] SAIR'),
       ),
     ),
   );

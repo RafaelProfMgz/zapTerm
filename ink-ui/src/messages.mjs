@@ -42,22 +42,28 @@ function mediaHint(msg) {
   }
 }
 
-// MessageLine: estilo IRC "[15:04:05] <nome> texto". Texto corrido em cinza
-// claro; verdes só em nomes, "eu" e estado de reprodução.
+// MessageLine: estilo IRC "[15:04:05] <nome> texto" em colunas, como o
+// design — timestamp e nome são colunas fixas, o texto quebra alinhado.
 function MessageLine({msg, isSelected, isPlaying}) {
   const who = msg.fromMe ? '<eu>' : `<${msg.contactShort || msg.contactName || '?'}>`;
-  const whoColor = msg.fromMe ? theme.me : contactColor(msg.contactShort || msg.contactName, theme);
+  const whoColor = msg.fromMe ? theme.primary : contactColor(msg.contactShort || msg.contactName, theme);
   const hint = mediaHint(msg);
-  return h(Box, null,
-    h(Text, {
-      backgroundColor: isSelected ? theme.clayDark : undefined,
-      wrap: 'wrap',
-    },
-      h(Text, {color: theme.clay}, `[${stamp(msg.timestamp)}] `),
-      h(Text, {color: whoColor, bold: true}, who),
-      h(Text, {color: msg.forwarded ? theme.sage : theme.text}, ` ${msg.text}`),
-      hint ? h(Text, {color: theme.clay, dimColor: true}, `  (${hint})`) : null,
-      isPlaying ? h(Text, {color: theme.accent, bold: true}, '  ▶ TOCANDO') : null,
+  const bg = isSelected ? theme.surfaceHighest : undefined;
+  return h(Box, {paddingLeft: 1},
+    h(Box, {flexShrink: 0},
+      h(Text, {color: theme.textDim, dimColor: true, backgroundColor: bg},
+        `[${stamp(msg.timestamp)}] `),
+      h(Text, {color: whoColor, bold: true, backgroundColor: bg}, who),
+    ),
+    h(Box, {flexGrow: 1, flexBasis: 0},
+      h(Text, {wrap: 'wrap', backgroundColor: bg},
+        h(Text, {
+          color: msg.forwarded ? theme.secondaryDim : theme.text,
+          italic: msg.forwarded,
+        }, ` ${msg.text}`),
+        hint ? h(Text, {color: theme.textDim, dimColor: true}, `  (${hint})`) : null,
+        isPlaying ? h(Text, {color: theme.primary, bold: true}, '  ▶ TOCANDO') : null,
+      ),
     ),
   );
 }
@@ -69,9 +75,9 @@ export function LogView({log, height}) {
   return h(Box, {flexDirection: 'column'},
     ...slice.map((line, i) => h(Text, {
       key: i,
-      color: line.kind === 'error' ? theme.danger : theme.clay,
+      color: line.kind === 'error' ? theme.error : theme.textDim,
       wrap: 'truncate-end',
-    }, line.text || ' ')),
+    }, ` ${line.text || ''}`)),
   );
 }
 
@@ -89,7 +95,10 @@ export default function Messages({msgs, log, chatName, selected, playingId, focu
     slice.forEach((m, i) => {
       const day = dayOf(m.timestamp);
       if (day !== lastDay) {
-        body.push(h(Text, {key: `sep-${m.id}`, color: theme.clayDark}, daySeparator(m.timestamp)));
+        body.push(h(Text, {
+          key: `sep-${m.id}`,
+          color: theme.outlineDim,
+        }, ` ${daySeparator(m.timestamp)}`));
         lastDay = day;
       }
       body.push(h(MessageLine, {
@@ -104,11 +113,17 @@ export default function Messages({msgs, log, chatName, selected, playingId, focu
   return h(Box, {
     flexDirection: 'column',
     flexGrow: 1,
+    overflow: 'hidden',
     borderStyle: 'single',
-    borderColor: focused ? theme.accent : theme.clayDark,
+    borderColor: focused ? theme.primary : theme.outlineDim,
   },
-    h(Text, {color: focused ? theme.accent : theme.clay, bold: true},
-      ` [ ${(chatName || 'MENSAGENS').toUpperCase()} ]`),
+    h(Text, {wrap: 'truncate'},
+      h(Text, {color: focused ? theme.primary : theme.textDim, bold: true},
+        ` [ ${(chatName || 'MENSAGENS').toUpperCase()} ]`),
+      chatName
+        ? h(Text, {color: theme.textDim, dimColor: true}, ' // sessão_criptografada')
+        : null,
+    ),
     ...body,
   );
 }

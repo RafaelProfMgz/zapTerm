@@ -37,12 +37,24 @@ npm install
 npm start          # ou: ZAPTERM_BIN=/caminho/zapterm npm start
 ```
 
+## Telas
+
+Quatro telas, seguindo os mockups de `design/`:
+
+| Tecla | Tela | O quê |
+| --- | --- | --- |
+| `F1` | SESSÃO | conversas + stream de mensagens + prompt |
+| `F2` | TÚNEL | mapa da conexão (host ⇄ WhatsApp) e estado da sessão |
+| `F3` | LOGS | console de telemetria do núcleo Go + métricas |
+| `F4` | CONFIG | arquivos, núcleo, tema e atalhos (somente leitura) |
+
 ## Teclas
 
 | Tecla | Ação |
 | --- | --- |
+| `F1-F4` | troca de tela (fora da SESSÃO, `1-4` também funciona) |
 | `Tab` | alterna painéis (conversas → mensagens → digitação) |
-| `↑/↓` | navegar |
+| `↑/↓` | navegar / rolar logs |
 | `Enter` | abrir conversa / enviar mensagem / tocar áudio selecionado |
 | `1-4` / `f` | filtros: Todas · Não lidas · Grupos · Contatos |
 | `p` / `o` / `d` | tocar áudio · abrir anexo · baixar (mensagem selecionada) |
@@ -52,7 +64,8 @@ npm start          # ou: ZAPTERM_BIN=/caminho/zapterm npm start
 
 ## Tema
 
-`src/theme.mjs` — mistura de verdes com cinza clay (nada de "tudo verde"):
-texto corrido em cinza claro, cromo (bordas/horários/dicas) em clay, verde
-brilhante apenas em destaques (foco, não lidas, reprodução) e cada contato
-ganha um tom de verde estável próprio, estilo IRC.
+`src/theme.mjs` — "Terminal Protocol" (`design/terminal_protocol/DESIGN.md`):
+âmbar queimado sobre terra escura, retro-técnico calmo. Cor com parcimônia:
+âmbar só em foco/prompt/destaques, ciano só em status de rede/sistema, texto
+corrido em off-white quente, contornos terrosos discretos e cada contato
+ganha um tom quente estável próprio, estilo IRC. Sem glow, sem emoji.

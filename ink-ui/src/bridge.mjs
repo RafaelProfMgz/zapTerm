@@ -32,6 +32,20 @@ export function createBridge() {
   const events = new EventEmitter();
   events.setMaxListeners(50);
 
+  // eventos chegados antes de a UI anexar os listeners (núcleo rápido) ficam
+  // num buffer e são reemitidos no start(), chamado depois do primeiro render
+  let started = false;
+  const pending = [];
+  const emit = msg => {
+    if (!started) {
+      pending.push(msg);
+      return;
+    }
+    // prefixo "ev:" porque "error" é especial no EventEmitter (sem listener,
+    // emitir "error" derruba o processo)
+    events.emit('ev:' + msg.type, msg);
+  };
+
   const rl = createInterface({input: proc.stdout});
   rl.on('line', line => {
     let msg;
@@ -40,13 +54,19 @@ export function createBridge() {
     } catch {
       msg = {type: 'text', text: line}; // linha solta vira log
     }
-    events.emit(msg.type, msg);
+    emit(msg);
   });
-  proc.on('exit', code => events.emit('exit', {type: 'exit', code}));
+  proc.on('exit', code => emit({type: 'exit', code}));
 
   return {
-    on: (type, fn) => events.on(type, fn),
-    off: (type, fn) => events.off(type, fn),
+    bin, // caminho do núcleo Go — exibido na tela CONFIG
+    on: (type, fn) => events.on('ev:' + type, fn),
+    off: (type, fn) => events.off('ev:' + type, fn),
+    start: () => {
+      if (started) return;
+      started = true;
+      for (const msg of pending.splice(0)) events.emit('ev:' + msg.type, msg);
+    },
     // send('select', [chatId]) → {"cmd":"select","params":["..."]}
     send: (cmd, params = []) => {
       try {
