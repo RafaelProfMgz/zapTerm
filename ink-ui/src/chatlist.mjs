@@ -19,14 +19,42 @@ export function shortTime(ts) {
   return `${String(t.getDate()).padStart(2, '0')}/${String(t.getMonth() + 1).padStart(2, '0')}`;
 }
 
+// sortChats: últimas conversadas primeiro; sem histórico vai pro fim, em
+// ordem alfabética. O núcleo Go já manda assim, mas a UI garante a ordem.
+export function sortChats(chats) {
+  return [...chats].sort((a, b) =>
+    (b.lastMessage || 0) - (a.lastMessage || 0) ||
+    String(a.name).localeCompare(String(b.name)));
+}
+
 export function filterChats(chats, filter) {
-  const hasActivity = chats.some(c => c.lastMessage > 0);
+  const sorted = sortChats(chats);
   switch (filter) {
-    case 1: return chats.filter(c => c.unread > 0);
-    case 2: return chats.filter(c => c.isGroup);
-    case 3: return chats.filter(c => !c.isGroup);
-    default: return hasActivity ? chats.filter(c => c.lastMessage > 0) : chats;
+    case 1: return sorted.filter(c => c.unread > 0);
+    case 2: return sorted.filter(c => c.isGroup);
+    case 3: return sorted.filter(c => !c.isGroup);
+    default: return sorted;
   }
+}
+
+// chatRows monta as linhas visíveis da lista: na fronteira entre as conversas
+// com histórico e os contatos sem conversa entra uma linha separadora.
+// Cada linha é {chat, index} (index aponta para o array de chats) ou {sep}.
+export function chatRows(chats) {
+  const rows = [];
+  chats.forEach((chat, index) => {
+    if (index > 0 && chats[index - 1].lastMessage > 0 && !(chat.lastMessage > 0)) {
+      rows.push({sep: true});
+    }
+    rows.push({chat, index});
+  });
+  return rows;
+}
+
+// rowScrollStart: janela de rolagem centrada na linha selecionada — usada
+// pelo render e pelo mapeamento de cliques do mouse (precisam concordar).
+export function rowScrollStart(rowCount, selRow, visible) {
+  return Math.max(0, Math.min(selRow - Math.floor(visible / 2), rowCount - visible));
 }
 
 function truncate(s, max) {
@@ -79,12 +107,17 @@ function FilterTabs({filter}) {
   return h(Text, null, ' ', ...parts);
 }
 
+function sepLine(width) {
+  const label = ' ── SEM_HISTÓRICO ';
+  return (label + '─'.repeat(Math.max(0, width - 2 - label.length))).slice(0, width - 2);
+}
+
 export default function ChatList({chats, filter, selected, currentId, focused, height, width}) {
   const visible = Math.max(1, height - 5);
-  // janela de rolagem em torno da seleção
-  let start = Math.max(0, Math.min(selected - Math.floor(visible / 2), chats.length - visible));
-  if (start < 0) start = 0;
-  const slice = chats.slice(start, start + visible);
+  const rows = chatRows(chats);
+  const selRow = Math.max(0, rows.findIndex(r => r.index === selected));
+  const start = rowScrollStart(rows.length, selRow, visible);
+  const slice = rows.slice(start, start + visible);
 
   return h(Box, {
     flexDirection: 'column',
@@ -99,13 +132,15 @@ export default function ChatList({chats, filter, selected, currentId, focused, h
     h(Text, {color: theme.textDim, dimColor: true},
       ` PEERS_CONECTADOS: ${chats.length}`),
     h(FilterTabs, {filter}),
-    ...slice.map((c, i) => h(Row, {
-      key: c.id,
-      chat: c,
-      isSelected: focused && start + i === selected,
-      isCurrent: c.id === currentId,
-      width,
-    })),
+    ...slice.map(r => r.sep
+      ? h(Text, {key: 'sep', color: theme.outlineDim, dimColor: true}, sepLine(width))
+      : h(Row, {
+        key: r.chat.id,
+        chat: r.chat,
+        isSelected: focused && r.index === selected,
+        isCurrent: r.chat.id === currentId,
+        width,
+      })),
     chats.length === 0
       ? h(Text, {color: theme.outlineDim, dimColor: true}, ' FIM_DA_LISTA')
       : null,

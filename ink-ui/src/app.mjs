@@ -3,7 +3,7 @@ import {Box, Text, useApp, useInput, useStdin, useStdout} from 'ink';
 import {TextInput} from '@inkjs/ui';
 import {createBridge} from './bridge.mjs';
 import theme from './theme.mjs';
-import ChatList, {FILTERS, filterChats} from './chatlist.mjs';
+import ChatList, {FILTERS, filterChats, chatRows, rowScrollStart} from './chatlist.mjs';
 import Messages from './messages.mjs';
 import TunnelScreen from './tunnel.mjs';
 import LogsScreen from './logs.mjs';
@@ -65,7 +65,42 @@ function NavTabs({screen}) {
   );
 }
 
-export default function App() {
+// Posições calculadas das abas — o mapeamento de cliques do mouse precisa
+// concordar com o que NavTabs, a taskbar e o FilterTabs desenham.
+function navTabAt(x, cols) {
+  const total = SCREENS.reduce((t, s, i) => t + s.label.length + 2 + (i > 0 ? 1 : 0), 0);
+  let cur = cols - total; // as abas terminam na coluna cols-1 (paddingX: 1)
+  for (let i = 0; i < SCREENS.length; i++) {
+    if (i > 0) cur += 1; // espaço separador
+    const w = SCREENS[i].label.length + 2;
+    if (x >= cur && x < cur + w) return SCREENS[i].id;
+    cur += w;
+  }
+  return null;
+}
+
+function taskbarTabAt(x, screen) {
+  const prefix = screen === 'session' ? 'SESSÃO_ATIVA' : 'MODO_DIAGNÓSTICO';
+  let cur = 2 + prefix.length + 2;
+  for (let i = 0; i < SCREENS.length; i++) {
+    const w = `[F${i + 1}] ${SCREENS[i].label}`.length;
+    if (x >= cur && x < cur + w) return SCREENS[i].id;
+    cur += w + 1;
+  }
+  return null;
+}
+
+function filterTabAt(x) {
+  let cur = 3; // borda do painel (1) + espaço inicial do FilterTabs
+  for (let i = 0; i < FILTERS.length; i++) {
+    const w = FILTERS[i].toUpperCase().replace(' ', '_').length;
+    if (x >= cur && x < cur + w) return i;
+    cur += w + 1; // separador │
+  }
+  return null;
+}
+
+export default function App({mouse}) {
   const {exit} = useApp();
   const {stdout} = useStdout();
 
@@ -88,6 +123,14 @@ export default function App() {
   const currentChatRef = useRef(null);
   currentChatRef.current = currentChat;
   const connRef = useRef(false); // detecta transição de conexão p/ logar no feed
+  const mouseRef = useRef(null); // handler de mouse — atribuído mais abaixo
+
+  useEffect(() => {
+    if (!mouse) return;
+    const fn = ev => mouseRef.current?.(ev);
+    mouse.on('mouse', fn);
+    return () => mouse.off('mouse', fn);
+  }, [mouse]);
 
   useEffect(() => {
     const pushLog = (kind, text) =>
@@ -189,8 +232,67 @@ export default function App() {
   };
 
   const rows = stdout?.rows || 30;
+  const cols = stdout?.columns || 80;
   const innerHeight = rows - 4; // cabeçalho (2) + taskbar (2)
   const sessionHeight = innerHeight - 4; // prompt (3) + linha de dicas (1)
+
+  // mouse: o emitter vem de index.mjs (stdin filtrado); o handler vive num
+  // ref reatribuído a cada render para enxergar sempre o estado atual
+  mouseRef.current = ({type, x, y, dy}) => {
+    if (type === 'click' && y === 1) {
+      const id = navTabAt(x, cols);
+      if (id) { setScreen(id); setLogScroll(0); }
+      return;
+    }
+    if (type === 'click' && y === rows) {
+      const id = taskbarTabAt(x, screen);
+      if (id) { setScreen(id); setLogScroll(0); }
+      return;
+    }
+    if (screen === 'logs' && type === 'wheel') {
+      setLogScroll(s => Math.max(0, Math.min(log.length, s - dy * 3)));
+      return;
+    }
+    if (screen !== 'session') return;
+    const bodyTop = 3; // linha 1 = cabeçalho, linha 2 = borda
+    const bodyBottom = 2 + sessionHeight;
+    if (y >= bodyTop && y <= bodyBottom) {
+      if (x <= SIDEBAR_WIDTH) {
+        if (type === 'wheel') {
+          setFocus('chats');
+          setSelChat(s => Math.max(0, Math.min(visibleChats.length - 1, s + dy)));
+          return;
+        }
+        if (y === bodyTop + 3) { // linha das abas de filtro
+          const f = filterTabAt(x);
+          if (f != null) { setFilter(f); setSelChat(0); }
+          return;
+        }
+        // linhas de conversa: borda + título + peers + filtros = 4 linhas;
+        // a janela de rolagem é a mesma que o ChatList desenha
+        const list = chatRows(visibleChats);
+        const visible = Math.max(1, sessionHeight - 5);
+        const selRow = Math.max(0, list.findIndex(r => r.index === selChat));
+        const start = rowScrollStart(list.length, selRow, visible);
+        const row = y >= bodyTop + 4 ? list[start + (y - bodyTop - 4)] : null;
+        if (row && row.chat) {
+          setSelChat(row.index);
+          openChat(row.chat);
+          setFocus('input');
+        }
+        return;
+      }
+      // painel de mensagens: clique foca, roda navega como ↑/↓
+      setFocus('messages');
+      if (type === 'wheel') {
+        if (dy < 0) setSelMsg(s => Math.max(0, (s == null ? msgs.length : s) - 1));
+        else setSelMsg(s => (s == null ? null : Math.min(msgs.length - 1, s + 1)));
+      }
+      return;
+    }
+    // caixa do prompt (3 linhas logo abaixo dos painéis)
+    if (type === 'click' && y > bodyBottom && y <= bodyBottom + 3) setFocus('input');
+  };
 
   let body;
   if (screen === 'tunnel') {
@@ -237,7 +339,7 @@ export default function App() {
       ),
       h(Box, {paddingX: 1},
         h(Text, {color: theme.textDim, dimColor: true, wrap: 'truncate'},
-          '[TAB] painel · [↑/↓] navegar · [ENTER] abrir/enviar · [1-4] filtros · [P] áudio · [O] abrir · [D] baixar · [B] histórico'),
+          '[TAB] painel · [↑/↓] navegar · [ENTER] abrir/enviar · [1-4] filtros · [P] áudio · [O] abrir · [D] baixar · [B] histórico · mouse: clique/rolagem'),
       ),
     );
   }

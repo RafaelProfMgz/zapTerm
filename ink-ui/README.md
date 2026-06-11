@@ -62,6 +62,31 @@ Quatro telas, seguindo os mockups de `design/`:
 | `/comando` | qualquer comando do núcleo Go (`/connect`, `/read`, `/sendaudio`…) |
 | `Ctrl+Q` | sair |
 
+## Mouse
+
+A interface também responde ao mouse (protocolo SGR do terminal, habilitado
+em `src/mouse.mjs` — as sequências são filtradas do stdin antes de chegarem
+ao Ink):
+
+| Ação | O quê |
+| --- | --- |
+| clique nas abas (cabeçalho ou taskbar `[F1]…[F4]`) | troca de tela |
+| clique numa conversa | abre a conversa e foca a digitação |
+| clique nas abas de filtro | aplica o filtro (Todas · Não lidas · Grupos · Contatos) |
+| clique no painel de mensagens / no prompt | move o foco |
+| rolagem na lista de conversas | navega a seleção |
+| rolagem nas mensagens | navega/seleciona mensagens (como `↑/↓`) |
+| rolagem na tela LOGS | rola o console |
+
+Para selecionar texto com o mouse no terminal, segure `Shift` ao arrastar
+(padrão dos terminais quando o rastreio de mouse está ativo).
+
+## Lista de conversas
+
+As conversas com histórico vêm primeiro, ordenadas da última conversada para
+a mais antiga; abaixo da linha `── SEM_HISTÓRICO ──` ficam os contatos sem
+conversa, em ordem alfabética.
+
 ## Tema
 
 `src/theme.mjs` — "Terminal Protocol" (`design/terminal_protocol/DESIGN.md`):
