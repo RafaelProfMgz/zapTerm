@@ -21,6 +21,9 @@ type UiMessageHandler interface {
 	// its message so playing the same message again stops it (toggle).
 	PlayFile(path string, msgId string)
 	SetStatus(SessionStatus)
+	// SetStories pushes the grouped status@broadcast feed (stories), kept
+	// separate from the conversation list.
+	SetStories([]StatusUpdate)
 	OpenFile(string)
 	GetWriter() io.Writer
 }
@@ -82,7 +85,20 @@ type Message struct {
 	// DurationSecs is the media length in seconds (audio/video), 0 if unknown.
 	DurationSecs uint32
 	Unread       bool
-	RawMessage   *waProto.Message
+	// RawMessage is the original proto; it is never persisted to the local cache
+	// (huge, and re-download only works while online anyway).
+	RawMessage *waProto.Message `json:"-"`
+}
+
+// StatusUpdate groups one contact's status posts (stories). status@broadcast
+// messages are kept out of the normal chat list and surfaced here instead.
+type StatusUpdate struct {
+	SenderId    string
+	Name        string
+	Short       string
+	Unread      int
+	LastMessage int64
+	Messages    []Message
 }
 
 // internal contact representation to abstract from message lib

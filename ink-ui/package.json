@@ -8,7 +8,8 @@
     "zapterm-ink": "./src/index.mjs"
   },
   "scripts": {
-    "start": "node src/index.mjs"
+    "start": "node src/index.mjs",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"

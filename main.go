@@ -1353,6 +1353,11 @@ func (u UiHandler) SetStatus(status messages.SessionStatus) {
 	})
 }
 
+// SetStories is a no-op in the tview UI for now — the stories view lives in the
+// experimental Ink frontend (--ui=json). The method exists to satisfy
+// messages.UiMessageHandler.
+func (u UiHandler) SetStories(_ []messages.StatusUpdate) {}
+
 func (u UiHandler) GetWriter() io.Writer {
 	return textView
 }

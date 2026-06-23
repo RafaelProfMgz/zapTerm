@@ -39,20 +39,21 @@ npm start          # ou: ZAPTERM_BIN=/caminho/zapterm npm start
 
 ## Telas
 
-Quatro telas, seguindo os mockups de `design/`:
+Cinco telas, seguindo os mockups de `design/`:
 
 | Tecla | Tela | O quê |
 | --- | --- | --- |
 | `F1` | SESSÃO | conversas + stream de mensagens + prompt |
-| `F2` | TÚNEL | mapa da conexão (host ⇄ WhatsApp) e estado da sessão |
-| `F3` | LOGS | console de telemetria do núcleo Go + métricas |
-| `F4` | CONFIG | arquivos, núcleo, tema e atalhos (somente leitura) |
+| `F2` | STORIES | status (`status@broadcast`) agrupados por contato, separados das conversas |
+| `F3` | TÚNEL | mapa da conexão (host ⇄ WhatsApp) e estado da sessão |
+| `F4` | LOGS | console de telemetria do núcleo Go + métricas |
+| `F5` | CONFIG | arquivos, núcleo, tema e atalhos (somente leitura) |
 
 ## Teclas
 
 | Tecla | Ação |
 | --- | --- |
-| `F1-F4` | troca de tela (fora da SESSÃO, `1-4` também funciona) |
+| `F1-F5` | troca de tela (fora da SESSÃO, `1-5` também funciona) |
 | `Tab` | alterna painéis (conversas → mensagens → digitação) |
 | `↑/↓` | navegar / rolar logs |
 | `Enter` | abrir conversa / enviar mensagem / tocar áudio selecionado |
@@ -71,7 +72,7 @@ ao Ink):
 
 | Ação | O quê |
 | --- | --- |
-| clique nas abas (cabeçalho ou taskbar `[F1]…[F4]`) | troca de tela |
+| clique nas abas (cabeçalho ou taskbar `[F1]…[F5]`) | troca de tela |
 | clique numa conversa | abre a conversa e foca a digitação |
 | clique nas abas de filtro | aplica o filtro (Todas · Não lidas · Grupos · Contatos) |
 | clique no painel de mensagens / no prompt | move o foco |
@@ -87,6 +88,32 @@ Para selecionar texto com o mouse no terminal, segure `Shift` ao arrastar
 As conversas com histórico vêm primeiro, ordenadas da última conversada para
 a mais antiga; abaixo da linha `── SEM_HISTÓRICO ──` ficam os contatos sem
 conversa, em ordem alfabética.
+
+## Stories (status@broadcast)
+
+Os status do WhatsApp não se misturam mais com as conversas: o núcleo Go agrupa
+`status@broadcast` por autor e manda no evento `stories` (já com as mensagens).
+A tela `F2 STORIES` mostra os autores à esquerda (● = status não vistos) e os
+posts do autor selecionado à direita. `↑/↓` ou rolagem navegam os contatos.
+
+## Cache local
+
+As conversas e os últimos ~100 recados de cada chat ficam num JSON leve em
+`~/.config/whatscli/cache.json` (gravação com *debounce* de 2s + flush ao sair).
+Assim a lista de conversas e os stories já aparecem na abertura, antes mesmo de
+o WhatsApp sincronizar. O cache não guarda o proto bruto das mensagens (download
+de mídia só funciona online). Lado Go: `messages/cache.go`.
+
+## Testes
+
+```sh
+cd ink-ui
+npm test            # node --test: unidade (funções puras) + e2e do bridge
+```
+
+Os testes e2e sobem um núcleo falso (`test-fixtures/fake-core.mjs`) que fala o
+mesmo protocolo NDJSON, então não tocam no WhatsApp. No lado Go, `go test ./...`
+cobre o cache (round-trip) e a separação dos stories.
 
 ## Tema
 

@@ -270,6 +270,9 @@ func (md *MessageDatabase) GetChatIds() []Chat {
 
 	allChats := make([]Chat, 0, len(md.chats))
 	for _, chat := range md.chats {
+		if chat.Id == STATUSSUFFIX {
+			continue // stories live in their own view, not the conversation list
+		}
 		allChats = append(allChats, chat)
 	}
 	sort.Slice(allChats, func(i, j int) bool {
@@ -279,6 +282,64 @@ func (md *MessageDatabase) GetChatIds() []Chat {
 		return allChats[i].LastMessage > allChats[j].LastMessage
 	})
 	return allChats
+}
+
+// GetStatusUpdates groups the status@broadcast feed by sender, most recent
+// first. Each entry carries that contact's status posts so the UI can show the
+// stories view without any extra round-trip.
+func (md *MessageDatabase) GetStatusUpdates() []StatusUpdate {
+	md.messageLock.RLock()
+	msgs := md.messages[STATUSSUFFIX]
+	stored := make([]Message, len(msgs))
+	copy(stored, msgs)
+	md.messageLock.RUnlock()
+
+	bySender := make(map[string]*StatusUpdate)
+	order := make([]string, 0)
+	for _, m := range stored {
+		sender := m.SenderId
+		if sender == "" {
+			sender = m.ContactId
+		}
+		su, ok := bySender[sender]
+		if !ok {
+			su = &StatusUpdate{SenderId: sender, Name: m.ContactName, Short: m.ContactShort}
+			bySender[sender] = su
+			order = append(order, sender)
+		}
+		if su.Name == "" {
+			su.Name = m.ContactName
+		}
+		if su.Short == "" {
+			su.Short = m.ContactShort
+		}
+		if int64(m.Timestamp) > su.LastMessage {
+			su.LastMessage = int64(m.Timestamp)
+		}
+		if m.Unread {
+			su.Unread++
+		}
+		su.Messages = append(su.Messages, m)
+	}
+
+	out := make([]StatusUpdate, 0, len(order))
+	for _, sender := range order {
+		su := bySender[sender]
+		if su.Name == "" {
+			su.Name = md.GetIdName(su.SenderId)
+		}
+		if su.Short == "" {
+			su.Short = md.GetIdShort(su.SenderId)
+		}
+		out = append(out, *su)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].LastMessage == out[j].LastMessage {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].LastMessage > out[j].LastMessage
+	})
+	return out
 }
 
 // GetMessages returns all messages for the given chat.

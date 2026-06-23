@@ -9,6 +9,7 @@ import Messages from './messages.mjs';
 import TunnelScreen from './tunnel.mjs';
 import LogsScreen from './logs.mjs';
 import SettingsScreen from './settings.mjs';
+import StoriesScreen from './stories.mjs';
 
 const h = React.createElement;
 
@@ -17,18 +18,20 @@ const FOCUS_ORDER = ['chats', 'messages', 'input'];
 
 const SCREENS = [
   {id: 'session', label: 'SESSÃO'},
+  {id: 'stories', label: 'STORIES'},
   {id: 'tunnel', label: 'TÚNEL'},
   {id: 'logs', label: 'LOGS'},
   {id: 'settings', label: 'CONFIG'},
 ];
 
 // O useInput do Ink não distingue teclas F (chegam como input vazio), então
-// escutamos o stdin cru e casamos as sequências clássicas de F1-F4.
+// escutamos o stdin cru e casamos as sequências clássicas de F1-F5.
 const FKEY_SEQS = {
   '\x1bOP': 1, '\x1b[11~': 1, '\x1b[[A': 1,
   '\x1bOQ': 2, '\x1b[12~': 2, '\x1b[[B': 2,
   '\x1bOR': 3, '\x1b[13~': 3, '\x1b[[C': 3,
   '\x1bOS': 4, '\x1b[14~': 4, '\x1b[[D': 4,
+  '\x1b[15~': 5,
 };
 
 function useFKeys(onFKey) {
@@ -107,6 +110,8 @@ export default function App({mouse}) {
 
   const bridge = useMemo(() => createBridge(), []);
   const [chats, setChats] = useState([]);
+  const [stories, setStories] = useState([]);
+  const [storySel, setStorySel] = useState(0);
   const [msgs, setMsgs] = useState([]);
   const [log, setLog] = useState([{kind: 'text', text: 'iniciando o núcleo Go…', stamp: nowStamp()}]);
   const [status, setStatus] = useState({connected: false, lastSeen: ''});
@@ -143,6 +148,11 @@ export default function App({mouse}) {
       setLog(l => [...l.slice(-300), {kind, text, stamp: nowStamp()}]);
     bridge.on('ready', e => setVersion(e.version || ''));
     bridge.on('chats', e => setChats(e.chats || []));
+    bridge.on('stories', e => {
+      const list = e.stories || [];
+      setStories(list);
+      setStorySel(s => Math.max(0, Math.min(s, Math.max(0, list.length - 1))));
+    });
     bridge.on('screen', e => { setMsgs(e.messages || []); setSelMsg(null); });
     bridge.on('message', e => {
       if (e.message && currentChatRef.current && e.message.chatId === currentChatRef.current.id) {
@@ -216,8 +226,14 @@ export default function App({mouse}) {
   useInput((input, key) => {
     if (key.ctrl && input === 'q') { bridge.quit(); exit(); return; }
     if (screen !== 'session') {
-      // fora da sessão: 1-4 também troca de tela; ↑/↓ rola os logs
-      if (input >= '1' && input <= '4') { setScreen(SCREENS[Number(input) - 1].id); setLogScroll(0); return; }
+      // fora da sessão: 1-5 também troca de tela; ↑/↓ rola os logs / stories
+      if (input >= '1' && input <= '5') { setScreen(SCREENS[Number(input) - 1].id); setLogScroll(0); return; }
+      if (screen === 'stories') {
+        if (key.upArrow) setStorySel(s => Math.max(0, s - 1));
+        else if (key.downArrow) setStorySel(s => Math.min(Math.max(0, stories.length - 1), s + 1));
+        else if (key.escape) setScreen('session');
+        return;
+      }
       if (screen === 'logs') {
         if (key.upArrow) setLogScroll(s => Math.min(log.length, s + 1));
         else if (key.downArrow) setLogScroll(s => Math.max(0, s - 1));
@@ -298,6 +314,10 @@ export default function App({mouse}) {
       setLogScroll(s => Math.max(0, Math.min(log.length, s - dy * 3)));
       return;
     }
+    if (screen === 'stories' && type === 'wheel') {
+      setStorySel(s => Math.max(0, Math.min(Math.max(0, stories.length - 1), s + dy)));
+      return;
+    }
     if (screen !== 'session') return;
     if (finderOpen) {
       // com o finder aberto, a roda navega os resultados; cliques ficam de fora
@@ -347,7 +367,15 @@ export default function App({mouse}) {
   };
 
   let body;
-  if (screen === 'tunnel') {
+  if (screen === 'stories') {
+    body = h(StoriesScreen, {
+      stories,
+      selected: storySel,
+      focused: true,
+      height: innerHeight,
+      width: cols,
+    });
+  } else if (screen === 'tunnel') {
     body = h(TunnelScreen, {status, chats, version, log, height: innerHeight});
   } else if (screen === 'logs') {
     body = h(LogsScreen, {log, status, scroll: logScroll, height: innerHeight});

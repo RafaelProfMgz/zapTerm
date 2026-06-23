@@ -77,6 +77,29 @@ func (j *JsonUiHandler) SetChats(chats []messages.Chat) {
 	j.emit(map[string]any{"type": "chats", "chats": dtos})
 }
 
+func jsonStoryDto(s messages.StatusUpdate) map[string]any {
+	msgs := make([]map[string]any, 0, len(s.Messages))
+	for i := range s.Messages {
+		msgs = append(msgs, jsonMessageDto(&s.Messages[i]))
+	}
+	return map[string]any{
+		"senderId":    s.SenderId,
+		"name":        s.Name,
+		"short":       s.Short,
+		"unread":      s.Unread,
+		"lastMessage": s.LastMessage,
+		"messages":    msgs,
+	}
+}
+
+func (j *JsonUiHandler) SetStories(stories []messages.StatusUpdate) {
+	dtos := make([]map[string]any, 0, len(stories))
+	for _, s := range stories {
+		dtos = append(dtos, jsonStoryDto(s))
+	}
+	j.emit(map[string]any{"type": "stories", "stories": dtos})
+}
+
 func (j *JsonUiHandler) PrintError(err error) {
 	if err == nil {
 		return
@@ -165,6 +188,7 @@ func runJsonUi() {
 	}
 
 	stopAudio()
+	sessionManager.FlushCache() // persist the local cache before exiting
 	sessionManager.CommandChannel <- messages.Command{"disconnect", nil}
 	// give the manager a moment to flush the disconnect before exiting
 	time.Sleep(200 * time.Millisecond)
