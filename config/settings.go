@@ -26,6 +26,15 @@ type General struct {
 	CmdPrefix           string
 	ShowCommand         string
 	EnableNotifications bool
+	// EnableSystemNotification shows a desktop notification (notify-send on
+	// Linux, toast on Windows) with the system's own sound when a message
+	// arrives in a chat that is not open. Works the same under tview and the
+	// headless Ink core.
+	EnableSystemNotification bool
+	// UseTerminalBell also rings the audible terminal bell ("\a"). In the Ink
+	// frontend the bell is written to stderr (inherited by the launcher) so it
+	// reaches the real terminal without corrupting the NDJSON protocol that
+	// flows over stdout.
 	UseTerminalBell     bool
 	NotificationTimeout int64
 	BacklogMsgQuantity  int
@@ -113,17 +122,18 @@ type Bot struct {
 
 var Config = IniFile{
 	&General{
-		DownloadPath:        GetHomeDir() + "Downloads",
-		PreviewPath:         GetHomeDir() + "Downloads",
-		CmdPrefix:           "/",
-		ShowCommand:         "jp2a --color",
-		EnableNotifications: true,
-		UseTerminalBell:     true,
-		NotificationTimeout: 60,
-		BacklogMsgQuantity:  10,
-		InlineImages:        true,
-		InlineImageLines:    14,
-		AudioCommand:        "",
+		DownloadPath:             GetHomeDir() + "Downloads",
+		PreviewPath:              GetHomeDir() + "Downloads",
+		CmdPrefix:                "/",
+		ShowCommand:              "jp2a --color",
+		EnableNotifications:      true,
+		EnableSystemNotification: true,
+		UseTerminalBell:          false,
+		NotificationTimeout:      60,
+		BacklogMsgQuantity:       10,
+		InlineImages:             true,
+		InlineImageLines:         14,
+		AudioCommand:             "",
 	},
 	&Keymap{
 		SwitchPanels:    "Tab",

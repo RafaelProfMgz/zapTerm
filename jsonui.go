@@ -160,6 +160,7 @@ func (w *jsonLineWriter) Write(p []byte) (int, error) {
 // runJsonUi is the --ui=json entrypoint: starts the session manager headless
 // and pumps stdin commands into the CommandChannel until the frontend closes.
 func runJsonUi() {
+	messages.Headless = true // bell goes to stderr; stdout is the NDJSON protocol
 	jsonUi = &JsonUiHandler{enc: json.NewEncoder(os.Stdout)}
 	uiHandler = jsonUi
 	sessionManager = &messages.SessionManager{}

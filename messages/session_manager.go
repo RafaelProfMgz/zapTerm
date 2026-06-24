@@ -1066,14 +1066,32 @@ func (sm *SessionManager) outgoingMessageFromSendResponse(resp whatsmeow.SendRes
 	}
 }
 
+// Headless is set by the --ui=json entrypoint (Ink frontend). When true,
+// stdout carries the NDJSON protocol, so the terminal bell must not be written
+// there — it goes to stderr (inherited by the launcher) instead.
+var Headless bool
+
 func notify(title, message string) error {
 	if !config.Config.General.EnableNotifications {
 		return nil
-	} else if config.Config.General.UseTerminalBell {
-		_, err := fmt.Printf("\a")
-		return err
 	}
-	return beeep.Notify(title, message, "")
+	// Audible terminal bell (opt-in). In headless mode the bell is routed to
+	// stderr so it reaches the real terminal without corrupting the NDJSON
+	// protocol that flows over stdout.
+	if config.Config.General.UseTerminalBell {
+		out := os.Stdout
+		if Headless {
+			out = os.Stderr
+		}
+		fmt.Fprint(out, "\a")
+	}
+	// Desktop notification (popup + the system's own notification sound).
+	// beeep shells out to notify-send/dbus on Linux and toast on Windows, so it
+	// works the same whether running under tview or the headless Ink core.
+	if config.Config.General.EnableSystemNotification {
+		return beeep.Notify(title, message, "")
+	}
+	return nil
 }
 
 type eventHandler struct {
