@@ -55,6 +55,8 @@ type SessionManager struct {
 	botMsgIDs       map[string]bool // ids of messages the bot itself generated (this session)
 	botMsgIDsLock   sync.Mutex
 	currentRecvLock sync.RWMutex // guards currentReceiver against the streaming-bot goroutine
+	cacheTimer      *time.Timer  // debounces local cache writes
+	cacheLock       sync.Mutex   // guards cacheTimer
 }
 
 // Init initializes the SessionManager.
@@ -83,7 +85,58 @@ func (sm *SessionManager) StartManager() error {
 	return nil
 }
 
+// publishChats pushes the conversation list and the stories feed to the UI and
+// schedules a debounced local-cache write. Use this instead of calling SetChats
+// directly so stories stay in sync and the cache reflects new state.
+func (sm *SessionManager) publishChats() {
+	sm.uiHandler.SetChats(sm.db.GetChatIds())
+	sm.uiHandler.SetStories(sm.db.GetStatusUpdates())
+	sm.scheduleCacheSave()
+}
+
+// scheduleCacheSave writes the local cache 2s after the last change, coalescing
+// bursts (history sync, rapid messages) into a single write.
+func (sm *SessionManager) scheduleCacheSave() {
+	sm.cacheLock.Lock()
+	defer sm.cacheLock.Unlock()
+	if sm.cacheTimer != nil {
+		sm.cacheTimer.Stop()
+	}
+	sm.cacheTimer = time.AfterFunc(2*time.Second, func() {
+		if err := sm.db.SaveCache(config.GetCacheFilePath()); err != nil {
+			sm.uiHandler.PrintError(err)
+		}
+	})
+}
+
+// flushCache cancels any pending debounced write and persists immediately —
+// used on shutdown so the latest state is never lost.
+func (sm *SessionManager) flushCache() {
+	sm.cacheLock.Lock()
+	if sm.cacheTimer != nil {
+		sm.cacheTimer.Stop()
+		sm.cacheTimer = nil
+	}
+	sm.cacheLock.Unlock()
+	if err := sm.db.SaveCache(config.GetCacheFilePath()); err != nil {
+		sm.uiHandler.PrintError(err)
+	}
+}
+
+// FlushCache persists the local cache immediately, cancelling any pending
+// debounced write. The UI calls this on shutdown so the last changes survive.
+func (sm *SessionManager) FlushCache() {
+	sm.flushCache()
+}
+
 func (sm *SessionManager) runManager() error {
+	// show cached conversations immediately, before WhatsApp connects
+	if err := sm.db.LoadCache(config.GetCacheFilePath()); err != nil {
+		sm.uiHandler.PrintError(err)
+	}
+	sm.uiHandler.SetChats(sm.db.GetChatIds())
+	sm.uiHandler.SetStories(sm.db.GetStatusUpdates())
+
 	client, err := sm.getConnection()
 	if err != nil {
 		sm.uiHandler.PrintError(fmt.Errorf("failed to create WhatsApp connection: %v", err))
@@ -127,6 +180,7 @@ func (sm *SessionManager) runManager() error {
 		}
 	}
 
+	sm.flushCache()
 	fmt.Fprintln(sm.uiHandler.GetWriter(), "closing the receiver")
 	if sm.client != nil {
 		sm.client.Disconnect()
@@ -295,7 +349,7 @@ func (sm *SessionManager) loadRecentChats() {
 		}
 	}
 
-	sm.uiHandler.SetChats(sm.db.GetChatIds())
+	sm.publishChats()
 	if addedChats > 0 {
 		sm.uiHandler.PrintText(fmt.Sprintf("Loaded %d chats", addedChats))
 	}
@@ -572,7 +626,7 @@ func (sm *SessionManager) markCurrentChatRead() {
 
 	unreadMessages := sm.db.MarkChatRead(sm.currentReceiver)
 	if len(unreadMessages) == 0 {
-		sm.uiHandler.SetChats(sm.db.GetChatIds())
+		sm.publishChats()
 		sm.uiHandler.PrintText("No unread messages in current chat")
 		return
 	}
@@ -611,7 +665,7 @@ func (sm *SessionManager) markCurrentChatRead() {
 		}
 	}
 
-	sm.uiHandler.SetChats(sm.db.GetChatIds())
+	sm.publishChats()
 }
 
 func (sm *SessionManager) downloadCommand(params []string, preview, show bool) {
@@ -793,7 +847,7 @@ func (sm *SessionManager) createGroup(params []string) {
 		Name:        groupInfo.Name,
 		LastMessage: time.Now().Unix(),
 	})
-	sm.uiHandler.SetChats(sm.db.GetChatIds())
+	sm.publishChats()
 	sm.uiHandler.PrintText("created new group " + groupInfo.JID.String())
 }
 
@@ -847,7 +901,7 @@ func (sm *SessionManager) updateCurrentGroupSubject(params []string) {
 		IsGroup: true,
 		Name:    name,
 	})
-	sm.uiHandler.SetChats(sm.db.GetChatIds())
+	sm.publishChats()
 	sm.uiHandler.PrintText("updated subject for " + groupJID.String())
 }
 
@@ -895,7 +949,7 @@ func (sm *SessionManager) sendText(wid, text string) {
 	if sm.currentReceiver == wid {
 		sm.uiHandler.NewMessage(newMsg)
 	}
-	sm.uiHandler.SetChats(sm.db.GetChatIds())
+	sm.publishChats()
 }
 
 func (sm *SessionManager) sendMedia(chatID, path string, kind MessageKind) error {
@@ -980,7 +1034,7 @@ func (sm *SessionManager) sendMedia(chatID, path string, kind MessageKind) error
 	if sm.currentReceiver == chatID {
 		sm.uiHandler.NewMessage(newMsg)
 	}
-	sm.uiHandler.SetChats(sm.db.GetChatIds())
+	sm.publishChats()
 	return nil
 }
 
@@ -1053,7 +1107,7 @@ func (eh *eventHandler) handleLiveMessage(evt *events.Message) {
 		if eh.sm.db.MarkMessageRevoked(msg.Id) && eh.sm.currentReceiver == msg.ChatId {
 			eh.sm.uiHandler.NewScreen(eh.sm.getMessages(msg.ChatId))
 		}
-		eh.sm.uiHandler.SetChats(eh.sm.db.GetChatIds())
+		eh.sm.publishChats()
 		return
 	case "ignore":
 		return
@@ -1075,7 +1129,7 @@ func (eh *eventHandler) handleLiveMessage(evt *events.Message) {
 			eh.sm.uiHandler.PrintError(err)
 		}
 	}
-	eh.sm.uiHandler.SetChats(eh.sm.db.GetChatIds())
+	eh.sm.publishChats()
 }
 
 func (eh *eventHandler) handleHistorySync(evt *events.HistorySync) {
@@ -1135,7 +1189,7 @@ func (eh *eventHandler) handleHistorySync(evt *events.HistorySync) {
 		eh.sm.db.UpdateChatUnread(chatID, int(conv.GetUnreadCount()))
 	}
 
-	eh.sm.uiHandler.SetChats(eh.sm.db.GetChatIds())
+	eh.sm.publishChats()
 	if eh.sm.currentReceiver != "" {
 		eh.sm.uiHandler.NewScreen(eh.sm.getMessages(eh.sm.currentReceiver))
 	}
@@ -1231,7 +1285,9 @@ func (eh *eventHandler) messageFromInfo(info types.MessageInfo, raw *waProto.Mes
 }
 
 func (eh *eventHandler) contactForMessage(info types.MessageInfo) (string, string, string) {
-	if info.IsGroup {
+	// status@broadcast carries everyone's stories under one chat; attribute each
+	// post to its real sender (like a group) so stories can be grouped by author.
+	if info.IsGroup || info.Chat.String() == STATUSSUFFIX {
 		id := info.Sender.String()
 		return id, eh.getContactName(info.Sender), eh.getContactShort(info.Sender)
 	}

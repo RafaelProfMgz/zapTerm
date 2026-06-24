@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ import (
 	"github.com/zyedidia/clipboard"
 )
 
-var VERSION string = "v1.2.0"
+var VERSION string = "v2.0.0"
 
 var sndTxt string = ""
 var currentReceiver messages.Chat = messages.Chat{}
@@ -56,6 +57,13 @@ var uiHandler messages.UiMessageHandler
 
 func main() {
 	config.InitConfig()
+	// headless mode for the Ink frontend (ink-ui/): no tview, NDJSON on stdio
+	for _, arg := range os.Args[1:] {
+		if arg == "--ui=json" {
+			runJsonUi()
+			return
+		}
+	}
 	// The clipboard backend must be probed once at startup; without this the
 	// command-arg maps stay nil and the first copy/paste panics instead of
 	// using xclip/xsel/wl-clipboard (or a safe in-memory fallback).
@@ -1035,13 +1043,23 @@ func redrawChat() {
 }
 
 // queueRefreshChat re-renders the open chat from the UI goroutine; safe to call
-// from any goroutine (audio playback callbacks, session manager, …).
+// from any goroutine (audio playback callbacks, session manager, …). In
+// headless mode there is no tview app — the playback state goes to the
+// frontend as an event instead.
 func queueRefreshChat() {
+	if jsonUi != nil {
+		jsonUi.emit(map[string]any{"type": "playing", "msgId": currentPlayingMsgId()})
+		return
+	}
 	go app.QueueUpdateDraw(redrawChat)
 }
 
 // queuePrintError prints an error from any goroutine.
 func queuePrintError(err error) {
+	if jsonUi != nil {
+		jsonUi.PrintError(err)
+		return
+	}
 	go app.QueueUpdateDraw(func() {
 		PrintError(err)
 	})
@@ -1334,6 +1352,11 @@ func (u UiHandler) SetStatus(status messages.SessionStatus) {
 		UpdateStatusBar(status)
 	})
 }
+
+// SetStories is a no-op in the tview UI for now — the stories view lives in the
+// experimental Ink frontend (--ui=json). The method exists to satisfy
+// messages.UiMessageHandler.
+func (u UiHandler) SetStories(_ []messages.StatusUpdate) {}
 
 func (u UiHandler) GetWriter() io.Writer {
 	return textView

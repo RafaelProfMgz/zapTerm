@@ -4,3 +4,8 @@ whatscli.exe
 .env
 # pasta gerada por "make dist" (binarios + atalhos prontos para distribuir)
 dist/
+
+# ink-ui (frontend experimental Node)
+ink-ui/node_modules/
+
+design/

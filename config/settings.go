@@ -233,6 +233,15 @@ func GetSessionFilePath() string {
 	return GetHomeDir() + ".whatscli.session"
 }
 
+// GetCacheFilePath is where the lightweight local conversation cache lives
+// (chats + recent messages as JSON), so conversations show up offline.
+func GetCacheFilePath() string {
+	if cacheFilePath, err := xdg.ConfigFile("whatscli/cache.json"); err == nil {
+		return cacheFilePath
+	}
+	return GetHomeDir() + ".whatscli.cache.json"
+}
+
 // gets the OS home dir with a path separator at the end
 func GetHomeDir() string {
 	usr, err := user.Current()
