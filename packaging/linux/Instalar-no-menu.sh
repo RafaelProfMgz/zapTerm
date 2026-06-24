@@ -18,6 +18,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_ORIGEM="$DIR/zapterm"
+CORE_ORIGEM="$DIR/zapterm-core"
 LAUNCHER_ORIGEM="$DIR/Abrir-ZapTerm.sh"
 ICO_ORIGEM="$DIR/zapterm.png"
 
@@ -27,6 +28,7 @@ if [ ! -f "$BIN_ORIGEM" ]; then
 fi
 
 BIN_DEST="$HOME/.local/bin/zapterm"
+CORE_DEST="$HOME/.local/bin/zapterm-core"
 LAUNCHER_DEST="$HOME/.local/bin/zapterm-launch"
 ICON_DEST="$HOME/.local/share/icons/zapterm.png"
 APP_DIR="$HOME/.local/share/applications"
@@ -35,6 +37,14 @@ DESKTOP="$APP_DIR/zapterm.desktop"
 echo "==> Instalando binario em: $BIN_DEST"
 mkdir -p "$HOME/.local/bin"
 install -m 0755 "$BIN_ORIGEM" "$BIN_DEST"
+
+# A interface Ink ('zapterm') procura o nucleo Go 'zapterm-core' ao lado dela;
+# como ambos vao para ~/.local/bin, a deteccao por "binario vizinho" funciona.
+# Em pacotes sem Ink (ex.: Raspberry Pi) o 'zapterm-core' pode nao existir.
+if [ -f "$CORE_ORIGEM" ]; then
+  echo "==> Instalando nucleo Go em: $CORE_DEST"
+  install -m 0755 "$CORE_ORIGEM" "$CORE_DEST"
+fi
 
 echo "==> Instalando lancador (detecta o terminal) em: $LAUNCHER_DEST"
 # O lancador busca o binario 'zapterm' ao lado dele; como ambos vao para

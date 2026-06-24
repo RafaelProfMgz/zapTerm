@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to publish, e.g. v1.0.12"
+        description: "Release tag to publish, e.g. v2.0.0"
         required: true
 
 permissions:
@@ -17,92 +17,17 @@ env:
   RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
   RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
 
+# A partir da v2.0.0 a interface PADRAO e a Ink, compilada com "bun --compile"
+# num executavel unico (sem Node no usuario final). O nucleo Go vai ao lado como
+# "zapterm-core" (cerebro headless --ui=json; tambem e a UI classica tview).
+# Tudo e construido num unico runner Ubuntu via cross-compile:
+#   - nucleo Go: linux (nativo), windows (mingw), raspberrypi (arm gcc)
+#   - UI Ink:    linux (bun), windows (bun --target=bun-windows-x64)
+# Raspberry Pi (arm 32-bit) nao tem bun, entao recebe so o nucleo Go (tview).
 jobs:
-  build-native:
-    name: Build ${{ matrix.name }}
-    runs-on: ${{ matrix.runs_on }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux
-            runs_on: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            binary: zapterm
-          - name: windows
-            runs_on: windows-latest
-            goos: windows
-            goarch: amd64
-            binary: ZapTerm.exe
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ env.RELEASE_REF }}
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Build binary
-        shell: bash
-        env:
-          CGO_ENABLED: "1"
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          BINARY: ${{ matrix.binary }}
-        run: |
-          mkdir -p build
-          go build -trimpath -ldflags="-s -w" -o "build/$BINARY" .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: ${{ matrix.name }}-asset
-          path: build/${{ matrix.binary }}
-
-  build-raspberrypi:
-    name: Build raspberrypi
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ env.RELEASE_REF }}
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Install cross toolchain
-        run: sudo apt-get update && sudo apt-get install -y gcc-arm-linux-gnueabi
-
-      - name: Build binary
-        env:
-          CGO_ENABLED: "1"
-          CC: arm-linux-gnueabi-gcc
-          GOOS: linux
-          GOARCH: arm
-          GOARM: "5"
-        run: |
-          mkdir -p build
-          go build -trimpath -ldflags="-s -w" -o build/zapterm .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: raspberrypi-asset
-          path: build/zapterm
-
   release:
-    name: Publish GitHub release
+    name: Build and publish release
     runs-on: ubuntu-latest
-    needs:
-      - build-native
-      - build-raspberrypi
 
     steps:
       - uses: actions/checkout@v5
@@ -110,45 +35,75 @@ jobs:
           ref: ${{ env.RELEASE_REF }}
           fetch-depth: 0
 
-      - name: Download artifacts
-        uses: actions/download-artifact@v6
+      - uses: actions/setup-go@v6
         with:
-          path: artifacts
+          go-version-file: go.mod
 
-      - name: Install zip
-        run: sudo apt-get update && sudo apt-get install -y zip
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
-      # Monta os mesmos pacotes do "make dist": binario + lancador +
-      # instalador de atalho + atualizador + LEIA-ME + icone.
+      - name: Install cross toolchains and zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-arm-linux-gnueabi zip
+
+      - name: Install Ink dependencies
+        working-directory: ink-ui
+        run: npm ci
+
+      - name: Build Go cores (linux, windows, raspberrypi)
+        run: |
+          mkdir -p build
+          echo "==> linux amd64"
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags="-s -w" -o build/zapterm-core .
+          echo "==> windows amd64 (mingw)"
+          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc \
+            go build -trimpath -ldflags="-s -w" -o build/zapterm-core.exe .
+          echo "==> raspberrypi (arm)"
+          CGO_ENABLED=1 GOOS=linux GOARCH=arm GOARM=5 CC=arm-linux-gnueabi-gcc \
+            go build -trimpath -ldflags="-s -w" -o build/zapterm-rpi .
+
+      - name: Compile Ink UI bundles (linux, windows)
+        working-directory: ink-ui
+        run: |
+          echo "==> Ink linux"
+          bun build src/index.mjs --compile --outfile ../build/zapterm
+          echo "==> Ink windows"
+          bun build src/index.mjs --compile --target=bun-windows-x64 --outfile ../build/ZapTerm
+
       - name: Package assets
         run: |
           mkdir -p release-assets pkg
+          chmod +x build/zapterm build/zapterm-core build/zapterm-rpi
 
-          package_unix() { # package_unix <flavor> <binario-artifact>
-            local flavor="$1" bin="$2" dir="pkg/ZapTerm-$1"
-            mkdir -p "$dir"
-            cp "$bin" "$dir/zapterm"
-            cp packaging/linux/Abrir-ZapTerm.sh \
-               packaging/linux/Instalar-no-menu.sh \
-               packaging/linux/Atualizar-ZapTerm.sh \
-               packaging/linux/LEIA-ME.txt \
-               "$dir/"
-            cp assets/zapterm.png "$dir/"
-            chmod +x "$dir"/*.sh "$dir/zapterm"
-            (cd pkg && zip -qr "../release-assets/ZapTerm-${RELEASE_VERSION}-${flavor}.zip" "ZapTerm-$flavor")
-          }
+          # Linux: Ink (padrao) + nucleo Go
+          ldir="pkg/ZapTerm-linux"; mkdir -p "$ldir"
+          cp build/zapterm "$ldir/zapterm"
+          cp build/zapterm-core "$ldir/zapterm-core"
+          cp packaging/linux/Abrir-ZapTerm.sh packaging/linux/Instalar-no-menu.sh \
+             packaging/linux/Atualizar-ZapTerm.sh packaging/linux/LEIA-ME.txt "$ldir/"
+          cp assets/zapterm.png "$ldir/"
+          chmod +x "$ldir"/*.sh "$ldir/zapterm" "$ldir/zapterm-core"
+          (cd pkg && zip -qr "../release-assets/ZapTerm-${RELEASE_VERSION}-linux.zip" ZapTerm-linux)
 
-          package_unix linux artifacts/linux-asset/zapterm
-          package_unix raspberrypi artifacts/raspberrypi-asset/zapterm
+          # Raspberry Pi: so o nucleo Go (tview) como 'zapterm' (sem bun p/ arm)
+          rdir="pkg/ZapTerm-raspberrypi"; mkdir -p "$rdir"
+          cp build/zapterm-rpi "$rdir/zapterm"
+          cp packaging/linux/Abrir-ZapTerm.sh packaging/linux/Instalar-no-menu.sh \
+             packaging/linux/Atualizar-ZapTerm.sh packaging/linux/LEIA-ME.txt "$rdir/"
+          cp assets/zapterm.png "$rdir/"
+          chmod +x "$rdir"/*.sh "$rdir/zapterm"
+          (cd pkg && zip -qr "../release-assets/ZapTerm-${RELEASE_VERSION}-raspberrypi.zip" ZapTerm-raspberrypi)
 
-          mkdir -p pkg/ZapTerm-windows
-          cp artifacts/windows-asset/ZapTerm.exe pkg/ZapTerm-windows/
-          cp packaging/windows/Abrir-ZapTerm.bat \
-             packaging/windows/Instalar-no-menu-iniciar.bat \
-             packaging/windows/Atualizar-ZapTerm.bat \
-             packaging/windows/LEIA-ME.txt \
-             pkg/ZapTerm-windows/
-          cp assets/zapterm.ico pkg/ZapTerm-windows/
+          # Windows: Ink (padrao) + nucleo Go
+          wdir="pkg/ZapTerm-windows"; mkdir -p "$wdir"
+          cp build/ZapTerm.exe "$wdir/ZapTerm.exe"
+          cp build/zapterm-core.exe "$wdir/zapterm-core.exe"
+          cp packaging/windows/Abrir-ZapTerm.bat packaging/windows/Instalar-no-menu-iniciar.bat \
+             packaging/windows/Atualizar-ZapTerm.bat packaging/windows/LEIA-ME.txt "$wdir/"
+          cp assets/zapterm.ico "$wdir/"
           (cd pkg && zip -qr "../release-assets/ZapTerm-${RELEASE_VERSION}-windows.zip" ZapTerm-windows)
 
           ls -lah release-assets

@@ -9,10 +9,18 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+// Quando empacotado (bun --compile), import.meta.url aponta p/ um caminho
+// virtual; o núcleo Go vem ao lado do executável. process.execPath dá a pasta
+// real do binário tanto no modo empacotado quanto rodando via "node".
+const execDir = path.dirname(process.execPath);
 
 function findBinary() {
   const candidates = [
     process.env.ZAPTERM_BIN,
+    // núcleo empacotado ao lado do launcher Ink (nomes Linux e Windows)
+    path.join(execDir, 'zapterm-core'),
+    path.join(execDir, 'zapterm-core.exe'),
+    path.join(execDir, 'whatscli'),
     path.join(repoRoot, 'whatscli'),
     path.join(repoRoot, 'zapterm'),
     path.join(repoRoot, 'dist', 'ZapTerm-linux', 'zapterm'),
