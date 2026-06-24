@@ -9,8 +9,8 @@ Usage: ./release.sh [version] [--no-watch]
 
 If version is omitted, the script reads VERSION from main.go.
 It then creates the git tag, pushes it, and waits for the GitHub Actions
-"Release" workflow that publishes assets, updates the Homebrew tap, and
-publishes the AUR packages.
+"Release" workflow that builds the cores/UI and publishes the GitHub release
+with the Linux, Windows and Raspberry Pi assets.
 EOF
 }
 
@@ -122,7 +122,7 @@ main() {
 
     git push origin "refs/tags/$version"
     echo "Pushed tag $version"
-    echo "GitHub Actions will build artifacts, create the GitHub release, update the Homebrew tap, and publish the AUR packages."
+    echo "GitHub Actions will build the cores/UI and publish the GitHub release with the Linux, Windows and Raspberry Pi assets."
   fi
 
   if [ "$watch_release" -eq 1 ]; then
