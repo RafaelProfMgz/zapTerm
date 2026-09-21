@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - master
     tags:
       - "v*"
   workflow_dispatch:
@@ -13,10 +15,6 @@ on:
 permissions:
   contents: write
 
-env:
-  RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
-  RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
-
 # A partir da v2.0.0 a interface PADRAO e a Ink, compilada com "bun --compile"
 # num executavel unico (sem Node no usuario final). O nucleo Go vai ao lado como
 # "zapterm-core" (cerebro headless --ui=json; tambem e a UI classica tview).
@@ -25,14 +23,67 @@ env:
 #   - UI Ink:    linux (bun), windows (bun --target=bun-windows-x64)
 # Raspberry Pi (arm 32-bit) nao tem bun, entao recebe so o nucleo Go (tview).
 jobs:
+  # Descobre qual versao publicar e se ha o que publicar. Ao entrar codigo novo
+  # no master (merge de PR), a versao vem do VERSION do main.go: se a tag dessa
+  # versao ainda nao existir, a release sai sozinha; se ja existir, o job de
+  # build e pulado (push de doc/hotfix no master nao republica nada).
+  prepare:
+    name: Resolve release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      ref: ${{ steps.resolve.outputs.ref }}
+      publish: ${{ steps.resolve.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ github.event.inputs.tag }}"
+            ref="$version"
+            publish=true
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            version="${{ github.ref_name }}"
+            ref="${{ github.ref }}"
+            publish=true
+          else
+            # push no master: a versao e a do main.go (mesmo sed do release.sh)
+            version="$(sed -n 's/^var VERSION string = "\(v[^"]*\)"$/\1/p' main.go | head -n1)"
+            ref="${{ github.sha }}"
+            if [ -z "$version" ]; then
+              echo "Nao consegui ler a VERSION do main.go" >&2
+              exit 1
+            fi
+            if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+              echo "A tag $version ja existe — nada a publicar."
+              publish=false
+            else
+              publish=true
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "versao=$version publicar=$publish ref=$ref"
+
   release:
     name: Build and publish release
     runs-on: ubuntu-latest
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
 
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ env.RELEASE_REF }}
+          ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
 
       - uses: actions/setup-go@v6
@@ -122,10 +173,13 @@ jobs:
             echo "- Release $current_tag" > changes.txt
           fi
 
+      # Quando a release sai de um push no master, a tag ainda nao existe: a
+      # action a cria no commit deste run (target_commitish).
       - name: Create or update release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_VERSION }}
+          target_commitish: ${{ github.sha }}
           name: ${{ env.RELEASE_VERSION }}
           body_path: changes.txt
           files: release-assets/*.zip
