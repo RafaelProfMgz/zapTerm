@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import {filterChats, sortChats, chatRows, rowScrollStart, shortTime} from '../src/chatlist.mjs';
 import {fuzzyMatch, searchChats, rawJid} from '../src/finder.mjs';
 import {kindLabel, storyPreview} from '../src/stories.mjs';
+import {qrRuns, qrFits} from '../src/qr.mjs';
+import {settingsActionAt, settingsActionForKey, ACTIONS_ROW} from '../src/settings.mjs';
 
 const CHATS = [
   {id: 'a@s.whatsapp.net', isGroup: false, name: 'Alice', unread: 2, lastMessage: 300},
@@ -79,4 +81,42 @@ test('storyPreview: combina rótulo de mídia e legenda', () => {
   assert.equal(storyPreview({kind: 'image', text: ''}), '[imagem]');
   assert.equal(storyPreview({kind: 'text', text: 'oi'}), 'oi');
   assert.equal(storyPreview({kind: 'text', text: ''}), '(sem legenda)');
+});
+
+test('qrRuns: duas linhas de módulos viram uma linha de meia altura', () => {
+  const rows = qrRuns(['1010', '0101']);
+  assert.equal(rows.length, 1, 'quatro módulos de altura 2 = 1 linha do terminal');
+  // '1' em cima = preto na fonte, '0' embaixo = branco no fundo
+  assert.deepEqual(rows[0][0], {fg: 'black', bg: 'white', len: 1});
+  assert.equal(rows[0].reduce((t, r) => t + r.len, 0), 4, 'largura preservada');
+});
+
+test('qrRuns: linha ímpar ganha zona clara embaixo e trechos iguais se juntam', () => {
+  const rows = qrRuns(['1100']);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0], [
+    {fg: 'black', bg: 'white', len: 2},
+    {fg: 'white', bg: 'white', len: 2},
+  ]);
+});
+
+test('qrFits: recusa matriz maior que o espaço disponível', () => {
+  const matrix = Array(20).fill('0'.repeat(20));
+  assert.equal(qrFits(matrix, 20, 10), true);
+  assert.equal(qrFits(matrix, 19, 10), false, 'largura em módulos');
+  assert.equal(qrFits(matrix, 20, 9), false, 'altura em meia altura');
+  assert.equal(qrFits([], 80, 40), false);
+});
+
+test('settingsActionAt: clique nos botões de conexão da tela CONFIG', () => {
+  assert.equal(settingsActionAt(4, ACTIONS_ROW).cmd, 'reconectar');
+  assert.equal(settingsActionAt(22, ACTIONS_ROW).cmd, 'novoqr');
+  assert.equal(settingsActionAt(4, ACTIONS_ROW - 1), null, 'só a linha dos botões');
+  assert.equal(settingsActionAt(200, ACTIONS_ROW), null);
+});
+
+test('settingsActionForKey: atalhos aceitam maiúscula e minúscula', () => {
+  assert.equal(settingsActionForKey('r').cmd, 'reconectar');
+  assert.equal(settingsActionForKey('N').cmd, 'novoqr');
+  assert.equal(settingsActionForKey('x'), null);
 });

@@ -40,6 +40,20 @@ rl.on('line', line => {
   if (cmd.cmd === 'quit') {
     process.exit(0);
   }
+  if (cmd.cmd === 'reconectar' || cmd.cmd === 'novoqr') {
+    emit({type: 'status', connected: false, loggedIn: false, connecting: true, needsLogin: false});
+    emit({
+      type: 'qr',
+      event: 'code',
+      code: 'fake-pair-code',
+      matrix: ['1111', '1001', '1001', '1111'],
+      png: '/tmp/whatscli-qr.png',
+      message: 'leia o QR code no celular',
+    });
+  }
+  if (cmd.cmd === 'cancelqr') {
+    emit({type: 'qr', event: 'done', message: 'leitura do QR code cancelada'});
+  }
   if (cmd.cmd === 'select') {
     emit({
       type: 'screen',

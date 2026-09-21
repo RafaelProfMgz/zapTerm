@@ -21,6 +21,10 @@ type UiMessageHandler interface {
 	// its message so playing the same message again stops it (toggle).
 	PlayFile(path string, msgId string)
 	SetStatus(SessionStatus)
+	// SetQRCode pushes the login QR state to the UI: a new code to scan, or the
+	// outcome of the scan (success/expired/cancelled). The Ink frontend draws
+	// the matrix itself; the tview UI renders it in the message panel.
+	SetQRCode(QRCode)
 	// SetStories pushes the grouped status@broadcast feed (stories), kept
 	// separate from the conversation list.
 	SetStories([]StatusUpdate)
@@ -35,6 +39,42 @@ type SessionStatus struct {
 	BatteryPowersave bool
 	Connected        bool
 	LastSeen         string
+	// LoggedIn is true when a WhatsApp session is stored (the device is paired),
+	// independent of the socket being up right now.
+	LoggedIn bool
+	// Connecting is true while a login/reconnect attempt is in flight.
+	Connecting bool
+	// NeedsLogin is true when the UI should offer "reconnect / scan a new QR":
+	// no paired device and no attempt running.
+	NeedsLogin bool
+}
+
+// QRCodeEvent is the lifecycle of a login QR code.
+type QRCodeEvent string
+
+const (
+	// QRCodeShow carries a fresh code to scan (Matrix/Code/PngPath filled).
+	QRCodeShow QRCodeEvent = "code"
+	// QRCodeSuccess means the phone scanned it and the session is paired.
+	QRCodeSuccess QRCodeEvent = "success"
+	// QRCodeDone closes the QR view without a successful pairing (timeout,
+	// cancelled by the user, or a connection error).
+	QRCodeDone QRCodeEvent = "done"
+)
+
+// QRCode is one update of the login QR state.
+type QRCode struct {
+	Event QRCodeEvent
+	// Code is the raw payload encoded in the QR (whatsmeow pairing code).
+	Code string
+	// Matrix has one string per row, '1' = dark module, '0' = light module,
+	// quiet zone included. Only filled for QRCodeShow.
+	Matrix []string
+	// PngPath is the same code saved as an image, for terminals where the
+	// drawn code will not scan.
+	PngPath string
+	// Message is a pt-BR line describing the current state, for the log feed.
+	Message string
 }
 
 // message struct for battery messages

@@ -195,3 +195,28 @@ var outer = colorable.NewColorableStdout()
 func SavePNG(content, path string, size int) error {
 	return qrcode.WriteFile(content, qrcode.Medium, size, path)
 }
+
+// Matrix renders content as rows of '1' (dark module) and '0' (light module),
+// keeping the 4-module quiet zone that go-qrcode's Bitmap() already includes.
+// The terminal renderer above strips that border, which makes the code hard to
+// scan; frontends that draw the QR themselves (the Ink UI) use this instead.
+func Matrix(content string) ([]string, error) {
+	qr, err := qrcode.New(content, qrcode.Medium)
+	if err != nil {
+		return nil, err
+	}
+	bitmap := qr.Bitmap()
+	rows := make([]string, 0, len(bitmap))
+	for _, row := range bitmap {
+		var b nbytes.Buffer
+		for _, dark := range row {
+			if dark {
+				b.WriteByte('1')
+			} else {
+				b.WriteByte('0')
+			}
+		}
+		rows = append(rows, b.String())
+	}
+	return rows, nil
+}

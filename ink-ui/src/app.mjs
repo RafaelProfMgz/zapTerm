@@ -8,7 +8,8 @@ import Finder, {FINDER_SCOPES, searchChats} from './finder.mjs';
 import Messages from './messages.mjs';
 import TunnelScreen from './tunnel.mjs';
 import LogsScreen from './logs.mjs';
-import SettingsScreen from './settings.mjs';
+import SettingsScreen, {settingsActionAt, settingsActionForKey} from './settings.mjs';
+import QRScreen from './qr.mjs';
 import StoriesScreen from './stories.mjs';
 
 const h = React.createElement;
@@ -114,7 +115,9 @@ export default function App({mouse}) {
   const [storySel, setStorySel] = useState(0);
   const [msgs, setMsgs] = useState([]);
   const [log, setLog] = useState([{kind: 'text', text: 'iniciando o núcleo Go…', stamp: nowStamp()}]);
-  const [status, setStatus] = useState({connected: false, lastSeen: ''});
+  const [status, setStatus] = useState({connected: false, lastSeen: '', loggedIn: false, connecting: false, needsLogin: false});
+  const [qr, setQr] = useState(null); // {matrix, png, message} do login por QR
+  const [qrHidden, setQrHidden] = useState(false); // ESC esconde sem cancelar
   const [version, setVersion] = useState('');
   const [currentChat, setCurrentChat] = useState(null);
   const [playingId, setPlayingId] = useState('');
@@ -167,7 +170,23 @@ export default function App({mouse}) {
           ? '[TÚNEL_ESTABELECIDO] conexão estável.'
           : '[TÚNEL_PERDIDO] aguardando reconexão…');
       }
-      setStatus({connected, lastSeen: e.lastSeen || ''});
+      setStatus({
+        connected,
+        lastSeen: e.lastSeen || '',
+        loggedIn: !!e.loggedIn,
+        connecting: !!e.connecting,
+        needsLogin: !!e.needsLogin,
+      });
+    });
+    bridge.on('qr', e => {
+      if (e.event === 'code') {
+        setQr({matrix: e.matrix || [], png: e.png || '', message: e.message || ''});
+      } else {
+        // success/done: some o QR e volta à sessão
+        setQr(null);
+        setQrHidden(false);
+      }
+      if (e.message) pushLog('net', e.message);
     });
     bridge.on('playing', e => setPlayingId(e.msgId || ''));
     bridge.on('text', e => pushLog('text', e.text));
@@ -198,6 +217,15 @@ export default function App({mouse}) {
     bridge.send(cmd, [msgs[selMsg].id]);
   };
 
+  // runAction manda um comando de conexão ao núcleo Go (os mesmos do prompt) e
+  // reabre a tela de QR caso ela tenha sido escondida.
+  const runAction = cmd => {
+    setQrHidden(false);
+    bridge.send(cmd);
+  };
+
+  const qrVisible = !!qr && !qrHidden;
+
   const openFinder = () => {
     setFinderOpen(true);
     setFinderQuery('');
@@ -225,6 +253,18 @@ export default function App({mouse}) {
 
   useInput((input, key) => {
     if (key.ctrl && input === 'q') { bridge.quit(); exit(); return; }
+    if (key.ctrl && input === 'r') { runAction('reconectar'); return; }
+    if (qrVisible) {
+      // a tela de QR cobre as demais: só as ações de pareamento respondem
+      if (key.escape) { setQrHidden(true); return; }
+      if (input === 'n' || input === 'N') runAction('novoqr');
+      else if (input === 'c' || input === 'C') bridge.send('cancelqr');
+      return;
+    }
+    if (screen === 'settings') {
+      const action = settingsActionForKey(input);
+      if (action) { runAction(action.cmd); return; }
+    }
     if (screen !== 'session') {
       // fora da sessão: 1-5 também troca de tela; ↑/↓ rola os logs / stories
       if (input >= '1' && input <= '5') { setScreen(SCREENS[Number(input) - 1].id); setLogScroll(0); return; }
@@ -300,6 +340,7 @@ export default function App({mouse}) {
   // mouse: o emitter vem de index.mjs (stdin filtrado); o handler vive num
   // ref reatribuído a cada render para enxergar sempre o estado atual
   mouseRef.current = ({type, x, y, dy}) => {
+    if (qrVisible) return; // a tela de QR é só teclado
     if (type === 'click' && y === 1) {
       const id = navTabAt(x, cols);
       if (id) { setScreen(id); setLogScroll(0); }
@@ -316,6 +357,11 @@ export default function App({mouse}) {
     }
     if (screen === 'stories' && type === 'wheel') {
       setStorySel(s => Math.max(0, Math.min(Math.max(0, stories.length - 1), s + dy)));
+      return;
+    }
+    if (screen === 'settings' && type === 'click') {
+      const action = settingsActionAt(x, y);
+      if (action) runAction(action.cmd);
       return;
     }
     if (screen !== 'session') return;
@@ -367,7 +413,9 @@ export default function App({mouse}) {
   };
 
   let body;
-  if (screen === 'stories') {
+  if (qrVisible) {
+    body = h(QRScreen, {qr, height: innerHeight, width: cols});
+  } else if (screen === 'stories') {
     body = h(StoriesScreen, {
       stories,
       selected: storySel,
@@ -432,7 +480,7 @@ export default function App({mouse}) {
       ),
       h(Box, {paddingX: 1},
         h(Text, {color: theme.textDim, dimColor: true, wrap: 'truncate'},
-          '[TAB] painel · [↑/↓] navegar · [ENTER] abrir/enviar · [CTRL+F] buscar · [1-4] filtros · [P] áudio · [O] abrir · [D] baixar · [B] histórico · mouse: clique/rolagem'),
+          '[TAB] painel · [↑/↓] navegar · [ENTER] abrir/enviar · [CTRL+F] buscar · [CTRL+R] reconectar · [1-4] filtros · [P] áudio · [O] abrir · [D] baixar · [B] histórico'),
       ),
     );
   }
@@ -450,8 +498,10 @@ export default function App({mouse}) {
         h(Text, {color: theme.primary, bold: true}, 'ZAPTERM PROTOCOL'),
         h(Text, {color: theme.secondary}, version ? ` ${version}` : ''),
         h(Text, {color: theme.outlineDim}, ' — '),
-        h(Text, {color: status.connected ? theme.textDim : theme.error},
-          status.connected ? 'CONEXÃO CRIPTOGRAFADA' : 'SEM CONEXÃO'),
+        h(Text, {color: status.connected ? theme.textDim : status.connecting ? theme.secondary : theme.error},
+          status.connected ? 'CONEXÃO CRIPTOGRAFADA'
+            : status.connecting ? 'CONECTANDO…'
+              : status.needsLogin ? 'SEM SESSÃO — [CTRL+R] RECONECTAR' : 'SEM CONEXÃO'),
       ),
       h(NavTabs, {screen}),
     ),
@@ -476,8 +526,12 @@ export default function App({mouse}) {
         )),
       ),
       h(Text, null,
-        h(Text, {color: status.connected ? theme.tertiary : theme.error, bold: true},
-          status.connected ? '[ONLINE]' : '[OFFLINE]'),
+        h(Text, null, ' '),
+        h(Text, {
+          color: status.connected ? theme.tertiary : status.connecting ? theme.secondary : theme.error,
+          bold: true,
+        },
+        status.connected ? '[ONLINE]' : status.connecting ? '[CONECTANDO]' : status.needsLogin ? '[SEM SESSÃO]' : '[OFFLINE]'),
         h(Text, {color: theme.error}, '  [CTRL+Q] SAIR'),
       ),
     ),

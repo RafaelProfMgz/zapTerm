@@ -145,9 +145,28 @@ A ajuda completa, comandos e atalhos estão dentro do app: digite `/help` (ou te
 
 ### Login
 
-Ao iniciar, o ZapTerm tenta conectar e mostra um **QR Code**. Escaneie com o WhatsApp do
-celular. Se o QR não couber na tela, diminua a fonte do terminal ou aumente a janela.
-Depois da primeira vez, ele reconecta sozinho. Para sair da conta, digite `/logout`.
+Ao iniciar, o ZapTerm tenta conectar e mostra um **QR Code** desenhado no terminal
+(também salvo como imagem em `~/.config/whatscli/whatscli-qr.png`). Escaneie com o
+WhatsApp do celular em *Aparelhos conectados > Conectar aparelho*. Se o QR não couber na
+tela, diminua a fonte do terminal ou aumente a janela. Depois da primeira vez, ele
+reconecta sozinho.
+
+### Reconectar / trocar de conta
+
+Quando a sessão cai ou é encerrada pelo celular, o rodapé mostra `[SEM SESSÃO]` e o QR
+volta sozinho (desligue com `auto_reconnect = false` no `whatscli.config`). Para
+reconectar na mão:
+
+| Como | O quê |
+| --- | --- |
+| `Ctrl+R` (em qualquer tela) | reconectar com a sessão atual |
+| Tela `[F5] CONFIG` | botões `[R] RECONECTAR`, `[N] NOVO_QR`, `[D] DESCONECTAR`, `[L] SAIR_DA_CONTA`, `[Z] RESETAR_SESSAO` (clique ou tecla) |
+| `/reconectar` (ou `/re-conect`, `/connect`) | reconectar com a sessão atual |
+| `/novoqr` | apagar a sessão e ler um QR novo |
+| `/cancelqr` | cancelar a leitura do QR em andamento |
+| `/logout` | sair da conta neste computador |
+
+Na tela do QR: `[N]` gera outro código, `[C]` cancela e `[ESC]` esconde sem cancelar.
 
 ### Mensagens e comandos
 

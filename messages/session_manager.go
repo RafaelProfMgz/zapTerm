@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -19,7 +20,6 @@ import (
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
 	"github.com/normen/whatscli/config"
 	"github.com/normen/whatscli/qrcode"
-	"github.com/rivo/tview"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -31,6 +31,10 @@ import (
 
 var urlPattern = regexp.MustCompile(`https?://[^\s]+`)
 
+// loggedOutCommand is queued by the whatsmeow event handler when the phone
+// unpairs this device; the "__" prefix keeps it out of reach of typed commands.
+const loggedOutCommand = "__loggedout"
+
 // SessionManager deals with the connection and receives commands from the UI.
 type SessionManager struct {
 	db              *MessageDatabase
@@ -41,6 +45,7 @@ type SessionManager struct {
 	BatteryChannel  chan BatteryMsg
 	StatusChannel   chan StatusMsg
 	CommandChannel  chan Command
+	LoginChannel    chan loginResult
 	ChatChannel     chan Chat
 	ContactChannel  chan Contact
 	TextChannel     chan *waProto.Message
@@ -57,6 +62,19 @@ type SessionManager struct {
 	currentRecvLock sync.RWMutex // guards currentReceiver against the streaming-bot goroutine
 	cacheTimer      *time.Timer  // debounces local cache writes
 	cacheLock       sync.Mutex   // guards cacheTimer
+	loggingIn       atomic.Bool  // a login/reconnect attempt is in flight
+	qrCancel        context.CancelFunc
+	pendingLogin    *bool // login requested while another one was unwinding
+}
+
+// loginResult is what the async login goroutine reports back to the manager
+// goroutine. Only the manager goroutine may touch sm.client, so the goroutine
+// reports and the manager acts.
+type loginResult struct {
+	err error
+	// retryQR means the stored session was rejected: drop it and ask for a new
+	// QR code.
+	retryQR bool
 }
 
 // Init initializes the SessionManager.
@@ -67,6 +85,7 @@ func (sm *SessionManager) Init(handler UiMessageHandler) {
 	sm.BatteryChannel = make(chan BatteryMsg, 10)
 	sm.StatusChannel = make(chan StatusMsg, 10)
 	sm.CommandChannel = make(chan Command, 10)
+	sm.LoginChannel = make(chan loginResult, 4)
 	sm.ChatChannel = make(chan Chat, 10)
 	sm.ContactChannel = make(chan Contact, 10)
 	sm.TextChannel = make(chan *waProto.Message, 10)
@@ -137,23 +156,17 @@ func (sm *SessionManager) runManager() error {
 	sm.uiHandler.SetChats(sm.db.GetChatIds())
 	sm.uiHandler.SetStories(sm.db.GetStatusUpdates())
 
-	client, err := sm.getConnection()
-	if err != nil {
-		sm.uiHandler.PrintError(fmt.Errorf("failed to create WhatsApp connection: %v", err))
-		return err
-	}
-	if client == nil {
-		return errors.New("could not establish WhatsApp connection")
-	}
-
-	if err = sm.loginWithConnection(client); err != nil {
-		sm.uiHandler.PrintError(err)
-	}
+	// the login runs in its own goroutine (the QR wait can take minutes), so the
+	// command loop below is live from the first frame — that is what makes the
+	// reconnect command/button usable while a QR is on screen.
+	sm.startLogin(false)
 
 	for sm.started {
 		select {
 		case command := <-sm.CommandChannel:
 			sm.execCommand(command)
+		case res := <-sm.LoginChannel:
+			sm.handleLoginResult(res)
 		case batteryMsg := <-sm.BatteryChannel:
 			sm.statusInfo.BatteryLoading = batteryMsg.loading
 			sm.statusInfo.BatteryPowersave = batteryMsg.powersave
@@ -164,17 +177,12 @@ func (sm *SessionManager) runManager() error {
 			if statusMsg.err == nil {
 				sm.statusInfo.Connected = statusMsg.connected
 			}
-			if sm.client != nil {
-				sm.statusInfo.Connected = sm.client.IsConnected()
-			} else {
-				sm.statusInfo.Connected = false
-			}
-			sm.uiHandler.SetStatus(sm.statusInfo)
+			sm.refreshStatus()
 			if prevStatus != sm.statusInfo.Connected {
 				if sm.statusInfo.Connected {
-					sm.uiHandler.PrintText("connected")
+					sm.uiHandler.PrintText("conectado")
 				} else {
-					sm.uiHandler.PrintText("disconnected")
+					sm.uiHandler.PrintText("desconectado")
 				}
 			}
 		}
@@ -222,17 +230,109 @@ func (sm *SessionManager) getConnection() (*whatsmeow.Client, error) {
 	return sm.client, nil
 }
 
-func (sm *SessionManager) login() error {
-	sm.client = nil
+// startLogin kicks off a (re)connection attempt. It returns immediately: the
+// work runs in a goroutine (the QR wait blocks for as long as the code is on
+// screen) and reports back on LoginChannel. forceQR drops the stored session
+// first, so a brand new QR code is generated.
+func (sm *SessionManager) startLogin(forceQR bool) {
+	if sm.loggingIn.Load() {
+		// an attempt is already running: cancel it and queue this one, which the
+		// manager starts as soon as the goroutine unwinds
+		sm.uiHandler.PrintText("cancelando a tentativa de conexão anterior…")
+		sm.pendingLogin = &forceQR
+		sm.cancelLogin()
+		return
+	}
+	if forceQR {
+		sm.clearStoredSession()
+	}
 	client, err := sm.getConnection()
 	if err != nil {
-		return fmt.Errorf("failed to create WhatsApp connection: %v", err)
+		sm.uiHandler.PrintError(fmt.Errorf("falha ao criar a conexão com o WhatsApp: %v", err))
+		sm.refreshStatus()
+		return
 	}
-	return sm.loginWithConnection(client)
+	ctx, cancel := context.WithCancel(context.Background())
+	sm.qrCancel = cancel
+	sm.loggingIn.Store(true)
+	sm.refreshStatus()
+	go sm.runLogin(ctx, client)
 }
 
-func (sm *SessionManager) loginWithConnection(client *whatsmeow.Client) error {
-	sm.uiHandler.PrintText("connecting..")
+// cancelLogin aborts the QR wait of the running attempt (if any). Runs on the
+// manager goroutine.
+func (sm *SessionManager) cancelLogin() {
+	if sm.qrCancel != nil {
+		sm.qrCancel()
+		sm.qrCancel = nil
+	}
+}
+
+// clearStoredSession forgets the paired device so the next login shows a QR
+// code. Runs on the manager goroutine (it writes sm.client).
+func (sm *SessionManager) clearStoredSession() {
+	if sm.client != nil {
+		if sm.client.IsConnected() {
+			sm.client.Disconnect()
+		}
+		if sm.client.Store != nil && sm.client.Store.ID != nil {
+			if err := sm.client.Store.Delete(context.Background()); err != nil {
+				sm.uiHandler.PrintText("Aviso: não foi possível remover a sessão anterior: " + err.Error())
+			}
+		}
+	}
+	// reconnecting opens a new container every time, so close this one instead
+	// of leaking a SQLite handle per attempt
+	if sm.container != nil {
+		sm.container.Close()
+	}
+	sm.client = nil
+	sm.container = nil
+}
+
+// handleLoginResult closes an attempt started by startLogin. Runs on the
+// manager goroutine.
+func (sm *SessionManager) handleLoginResult(res loginResult) {
+	sm.loggingIn.Store(false)
+	sm.qrCancel = nil
+	if pending := sm.pendingLogin; pending != nil {
+		sm.pendingLogin = nil
+		sm.startLogin(*pending)
+		return
+	}
+	if res.retryQR {
+		sm.startLogin(true) // stored session rejected: start over with a new QR
+		return
+	}
+	if res.err != nil {
+		p := config.Config.General.CmdPrefix
+		sm.uiHandler.PrintError(fmt.Errorf("falha ao conectar no WhatsApp: %v", res.err))
+		sm.uiHandler.PrintText("use " + p + "reconectar para tentar de novo ou " + p + "novoqr para ler um novo QR code")
+	}
+	sm.refreshStatus()
+}
+
+// refreshStatus recomputes the session state from the client and pushes it to
+// the UI. Runs on the manager goroutine.
+func (sm *SessionManager) refreshStatus() {
+	connected := sm.client != nil && sm.client.IsConnected()
+	loggedIn := sm.client != nil && sm.client.Store != nil && sm.client.Store.ID != nil
+	connecting := sm.loggingIn.Load()
+	sm.statusInfo.Connected = connected
+	sm.statusInfo.LoggedIn = loggedIn
+	sm.statusInfo.Connecting = connecting
+	sm.statusInfo.NeedsLogin = !loggedIn && !connecting
+	sm.uiHandler.SetStatus(sm.statusInfo)
+}
+
+// runLogin performs the connection off the manager goroutine. It only reads the
+// client pointer it was handed — every write to sm.client stays on the manager
+// goroutine — and always reports exactly one result.
+func (sm *SessionManager) runLogin(ctx context.Context, client *whatsmeow.Client) {
+	res := loginResult{}
+	defer func() { sm.LoginChannel <- res }()
+
+	sm.uiHandler.PrintText("conectando…")
 	if client.IsConnected() {
 		client.Disconnect()
 		sm.StatusChannel <- StatusMsg{false, nil}
@@ -240,68 +340,74 @@ func (sm *SessionManager) loginWithConnection(client *whatsmeow.Client) error {
 	}
 
 	if client.Store.ID == nil {
-		return sm.loginWithQRCode(client)
+		res.err = sm.waitForQRCode(ctx, client)
+		return
 	}
 
 	if err := client.Connect(); err != nil {
 		if errors.Is(err, whatsmeow.ErrNotConnected) || errors.Is(err, whatsmeow.ErrNotLoggedIn) {
-			sm.uiHandler.PrintText("Session expired, need to scan QR code again")
-			if delErr := client.Store.Delete(context.Background()); delErr != nil {
-				return fmt.Errorf("failed to clear expired session: %v", delErr)
-			}
-			sm.client = nil
-			client, err = sm.getConnection()
-			if err != nil {
-				return fmt.Errorf("failed to create new connection: %v", err)
-			}
-			return sm.loginWithQRCode(client)
+			sm.uiHandler.PrintText("sessão expirada — é preciso ler um novo QR code")
+			res.retryQR = true
+			return
 		}
-		return fmt.Errorf("connection failed: %v", err)
+		res.err = fmt.Errorf("conexão falhou: %v", err)
+		return
 	}
 
-	sm.uiHandler.PrintText("Session restored successfully")
+	sm.uiHandler.PrintText("sessão restaurada")
 	sm.StatusChannel <- StatusMsg{true, nil}
 	go sm.loadRecentChats()
-	return nil
 }
 
-func (sm *SessionManager) loginWithQRCode(client *whatsmeow.Client) error {
-	sm.uiHandler.PrintText("Please scan the QR code with your phone")
-	qrChan, err := client.GetQRChannel(context.Background())
+// waitForQRCode streams pairing codes to the UI until the phone scans one, the
+// code expires or ctx is cancelled (reconnect/disconnect asked for it).
+func (sm *SessionManager) waitForQRCode(ctx context.Context, client *whatsmeow.Client) error {
+	qrChan, err := client.GetQRChannel(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to initialize QR channel: %v", err)
+		return fmt.Errorf("falha ao iniciar o canal de QR: %v", err)
 	}
 	if err = client.Connect(); err != nil {
-		return fmt.Errorf("error connecting to WhatsApp: %v", err)
+		return fmt.Errorf("erro ao conectar no WhatsApp: %v", err)
 	}
 
 	pngPath := filepath.Join(filepath.Dir(config.GetSessionFilePath()), "whatscli-qr.png")
-	opened := false
 	for evt := range qrChan {
 		switch evt.Event {
 		case "code":
-			terminal := qrcode.New()
-			terminal.SetOutput(tview.ANSIWriter(sm.uiHandler.GetWriter()))
-			terminal.Get(evt.Code).Print()
-			// terminal QR can be unscannable (narrow panel / no quiet zone), so also
-			// save a clean PNG and open it once for the user to scan.
-			if err := qrcode.SavePNG(evt.Code, pngPath, 512); err == nil {
-				sm.uiHandler.PrintText("QR também salvo em " + pngPath + " — abra essa imagem e escaneie se o QR acima não funcionar.")
-				if !opened {
-					opened = true
-					sm.uiHandler.OpenFile(pngPath)
-				}
+			qr := QRCode{
+				Event:   QRCodeShow,
+				Code:    evt.Code,
+				Message: "leia o QR code no celular: WhatsApp > Aparelhos conectados > Conectar aparelho",
 			}
+			// the drawn code can be unscannable on narrow panels, so a clean PNG
+			// goes along as a fallback
+			if matrix, mErr := qrcode.Matrix(evt.Code); mErr == nil {
+				qr.Matrix = matrix
+			}
+			if pngErr := qrcode.SavePNG(evt.Code, pngPath, 512); pngErr == nil {
+				qr.PngPath = pngPath
+			}
+			sm.uiHandler.SetQRCode(qr)
 		case "success":
-			sm.uiHandler.PrintText("Successfully logged in!")
+			sm.uiHandler.SetQRCode(QRCode{Event: QRCodeSuccess, Message: "aparelho conectado com sucesso"})
 			sm.StatusChannel <- StatusMsg{true, nil}
 			go sm.loadRecentChats()
 			return nil
+		case "timeout":
+			p := config.Config.General.CmdPrefix
+			sm.uiHandler.SetQRCode(QRCode{Event: QRCodeDone, Message: "o QR code expirou — use " + p + "novoqr para gerar outro"})
+			return errors.New("o QR code expirou sem ser lido")
 		default:
-			sm.uiHandler.PrintText("QR event: " + evt.Event)
+			sm.uiHandler.PrintText("QR: " + evt.Event)
 		}
 	}
-	return errors.New("QR code channel closed without success")
+
+	if ctx.Err() != nil { // cancelled on purpose: not a failure
+		sm.uiHandler.SetQRCode(QRCode{Event: QRCodeDone, Message: "leitura do QR code cancelada"})
+		return nil
+	}
+	sm.uiHandler.SetQRCode(QRCode{Event: QRCodeDone, Message: "o canal do QR code fechou sem conexão"})
+	return errors.New("canal do QR code fechado sem sucesso")
 }
 
 func (sm *SessionManager) loadRecentChats() {
@@ -409,29 +515,32 @@ func (sm *SessionManager) getChatName(jid types.JID) string {
 }
 
 func (sm *SessionManager) disconnect() error {
+	sm.cancelLogin() // drops a QR wait still on screen
 	if sm.client != nil && sm.client.IsConnected() {
 		sm.client.Disconnect()
 		sm.StatusChannel <- StatusMsg{false, nil}
 	}
+	sm.refreshStatus()
 	return nil
 }
 
 func (sm *SessionManager) logout() error {
+	sm.cancelLogin()
 	if sm.client == nil {
 		sm.StatusChannel <- StatusMsg{false, nil}
-		sm.uiHandler.PrintText("Already logged out")
+		sm.uiHandler.PrintText("já desconectado da conta")
 		return nil
 	}
 
 	if sm.client.Store != nil && sm.client.Store.ID != nil {
 		if err := sm.client.Logout(context.Background()); err != nil && !errors.Is(err, whatsmeow.ErrNotConnected) {
-			sm.uiHandler.PrintText("Warning: Couldn't fully log out: " + err.Error())
+			sm.uiHandler.PrintText("Aviso: não foi possível sair completamente: " + err.Error())
 		}
 	}
-	sm.client = nil
-	sm.container = nil
+	sm.clearStoredSession()
 	sm.StatusChannel <- StatusMsg{false, nil}
-	sm.uiHandler.PrintText("Successfully logged out")
+	p := config.Config.General.CmdPrefix
+	sm.uiHandler.PrintText("desconectado da conta — use " + p + "novoqr para entrar com outro QR code")
 	return nil
 }
 
@@ -441,14 +550,17 @@ func (sm *SessionManager) execCommand(command Command) {
 		sm.uiHandler.PrintText("[" + config.Config.Colors.Negative + "]Unknown command: [-]" + command.Name)
 	case "backlog":
 		sm.loadBacklog()
-	case "login", "connect":
-		err := sm.login()
-		if err != nil {
-			sm.uiHandler.PrintError(fmt.Errorf("WhatsApp connection failed: %v", err))
-			sm.uiHandler.PrintText("Try using /reset to completely reset the connection")
-		} else {
-			sm.uiHandler.PrintText("Successfully connected to WhatsApp")
-		}
+	case "login", "connect", "reconnect", "reconectar", "re-conect", "re-connect", "conectar":
+		// reconnect with the stored session; falls back to a QR code when there
+		// is no session or the server rejects it
+		sm.startLogin(false)
+	case "newqr", "novoqr", "qr", "relogin", "re-login", "novo-qr":
+		// forget the stored session and show a fresh QR code right away
+		sm.startLogin(true)
+	case "cancelqr", "cancelar":
+		sm.cancelLogin()
+	case loggedOutCommand:
+		sm.handlePhoneLogout()
 	case "reset":
 		sm.resetSession()
 	case "disconnect":
@@ -587,25 +699,32 @@ func (sm *SessionManager) loadBacklog() {
 }
 
 func (sm *SessionManager) resetSession() {
-	if sm.client != nil {
-		if sm.client.IsConnected() {
-			sm.client.Disconnect()
-		}
-		if sm.client.Store != nil {
-			if err := sm.client.Store.Delete(context.Background()); err != nil {
-				sm.uiHandler.PrintText("Warning: Couldn't remove session: " + err.Error())
-			}
-		}
-	}
-
-	sm.client = nil
-	sm.container = nil
+	sm.cancelLogin()
+	sm.clearStoredSession() // desconecta, apaga o pareamento e fecha o SQLite
 	dbPath := config.GetSessionFilePath() + ".db"
 	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
-		sm.uiHandler.PrintText("Warning: Couldn't remove database file: " + err.Error())
+		sm.uiHandler.PrintText("Aviso: não foi possível remover o arquivo da sessão: " + err.Error())
 	}
 	sm.StatusChannel <- StatusMsg{false, nil}
-	sm.uiHandler.PrintText("Session reset. Use /connect to reconnect with a new QR code.")
+	p := config.Config.General.CmdPrefix
+	sm.uiHandler.PrintText("sessão apagada — use " + p + "reconectar para ler um novo QR code")
+	sm.refreshStatus()
+}
+
+// handlePhoneLogout reacts to the device being unpaired from the phone. It runs
+// on the manager goroutine (the whatsmeow event handler only queues the
+// command) so it may drop the stored session and start a new login.
+func (sm *SessionManager) handlePhoneLogout() {
+	p := config.Config.General.CmdPrefix
+	sm.uiHandler.PrintText("a sessão foi encerrada no celular")
+	sm.clearStoredSession()
+	sm.refreshStatus()
+	if config.Config.General.AutoReconnect {
+		sm.uiHandler.PrintText("gerando um novo QR code…")
+		sm.startLogin(true)
+		return
+	}
+	sm.uiHandler.PrintText("use " + p + "reconectar para ler um novo QR code")
 }
 
 func (sm *SessionManager) markCurrentChatRead() {
@@ -1110,7 +1229,9 @@ func (eh *eventHandler) Handle(evt interface{}) {
 		eh.sm.StatusChannel <- StatusMsg{false, nil}
 	case *events.LoggedOut:
 		eh.sm.StatusChannel <- StatusMsg{false, nil}
-		eh.sm.uiHandler.PrintText("Logged out: " + fmt.Sprintf("%v", v.Reason))
+		eh.sm.uiHandler.PrintText("sessão encerrada: " + fmt.Sprintf("%v", v.Reason))
+		// mutating the client is the manager goroutine's job, so queue it
+		eh.sm.CommandChannel <- Command{loggedOutCommand, nil}
 	}
 }
 

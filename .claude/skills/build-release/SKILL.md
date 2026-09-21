@@ -43,6 +43,19 @@ make release   # tag + push + acompanha o workflow "Release" no GitHub
   o workflow GitHub Actions **"Release"** (usa `gh`). O workflow publica os
   assets, atualiza o tap Homebrew e os pacotes AUR.
 
+## Release automática ao entrar no master
+
+- O workflow `.github/workflows/release.yml` também roda em **push no
+  `master`** (merge de PR). O job `prepare` lê a `VERSION` do `main.go`:
+  - tag ainda não existe → constrói e publica a release sozinho (a tag é
+    criada no commit do merge);
+  - tag já existe → o job de build é pulado (push de doc no master não
+    republica nada).
+- Ou seja: **bumpar a `VERSION` no PR é o que dispara a release**. Sem bump,
+  o merge não publica.
+- Os outros gatilhos continuam: push de tag `v*` e `workflow_dispatch`
+  (`gh workflow run Release --ref <tag> -f tag=<tag>`).
+
 ## Onde fica cada coisa
 
 | Caminho | Conteúdo |

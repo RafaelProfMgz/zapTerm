@@ -19,9 +19,15 @@ description: Como funciona o pacote messages/ — conexão WhatsApp via whatsmeo
 - `Init()` + `StartManager()` sobem a goroutine `runManager()`, que consome:
   - `CommandChannel` — comandos vindos da UI (`Command{Name, Params}`)
   - `ChatChannel` / `StatusChannel` — atualizações internas
+  - `LoginChannel` — resultado da tentativa de conexão assíncrona
 - Conexão: `getConnection()` cria o `whatsmeow.Client` com device store
-  SQLite (`config.GetSessionFilePath()+".db"`). Login por QR:
-  `loginWithQRCode()`.
+  SQLite (`config.GetSessionFilePath()+".db"`). O login roda FORA da
+  goroutine do manager (`startLogin()` → `runLogin()` → `waitForQRCode()`),
+  senão a espera do QR travaria o loop de comandos; só o manager escreve em
+  `sm.client`, a goroutine devolve `loginResult` pelo `LoginChannel`.
+  `startLogin(true)` apaga o pareamento e força um QR novo. O QR vai para a
+  UI pela interface (`UiMessageHandler.SetQRCode`), como matriz de módulos —
+  o frontend desenha (mantendo a zona silenciosa, que o render antigo comia).
 - Eventos: `eventHandler.Handle()` — `events.Message` →
   `handleLiveMessage()`; `events.HistorySync` → `handleHistorySync()`.
   Ambos normalizam via `normalizeEventMessage` → `messageFromInfo`
@@ -30,7 +36,10 @@ description: Como funciona o pacote messages/ — conexão WhatsApp via whatsmeo
 - **Comandos**: switch em `execCommand()` (~linha 384). Casos atuais:
   send, select, read, backlog, download/open/show/play, url, upload,
   sendimage/sendvideo/sendaudio, revoke, grupos (create/add/remove/admin/
-  subject/leave), login/logout/reset/disconnect.
+  subject/leave), login/connect/reconectar/re-conect, novoqr, cancelqr,
+  logout/reset/disconnect. O evento `events.LoggedOut` volta pelo
+  `CommandChannel` como `__loggedout` (só o manager pode mexer no client) e,
+  com `auto_reconnect`, já dispara um QR novo.
 
 ## Mídia
 
