@@ -9,7 +9,7 @@ import Messages from './messages.mjs';
 import TunnelScreen from './tunnel.mjs';
 import LogsScreen from './logs.mjs';
 import SettingsScreen, {settingsActionAt, settingsActionForKey} from './settings.mjs';
-import QRScreen from './qr.mjs';
+import QRScreen, {qrLayout} from './qr.mjs';
 import StoriesScreen from './stories.mjs';
 
 const h = React.createElement;
@@ -137,6 +137,7 @@ export default function App({mouse}) {
   const currentChatRef = useRef(null);
   currentChatRef.current = currentChat;
   const connRef = useRef(false); // detecta transição de conexão p/ logar no feed
+  const qrOpenedRef = useRef(false); // já abrimos a imagem deste pareamento?
   const mouseRef = useRef(null); // handler de mouse — atribuído mais abaixo
 
   useEffect(() => {
@@ -185,6 +186,7 @@ export default function App({mouse}) {
         // success/done: some o QR e volta à sessão
         setQr(null);
         setQrHidden(false);
+        qrOpenedRef.current = false;
       }
       if (e.message) pushLog('net', e.message);
     });
@@ -217,6 +219,11 @@ export default function App({mouse}) {
     bridge.send(cmd, [msgs[selMsg].id]);
   };
 
+  const rows = stdout?.rows || 30;
+  const cols = stdout?.columns || 80;
+  const innerHeight = rows - 4; // cabeçalho (2) + taskbar (2)
+  const sessionHeight = innerHeight - 4; // prompt (3) + linha de dicas (1)
+
   // runAction manda um comando de conexão ao núcleo Go (os mesmos do prompt) e
   // reabre a tela de QR caso ela tenha sido escondida.
   const runAction = cmd => {
@@ -225,6 +232,15 @@ export default function App({mouse}) {
   };
 
   const qrVisible = !!qr && !qrHidden;
+  // um código de pareamento real dá uma matriz 65x65 (33 linhas de terminal);
+  // quando a janela não comporta isso, a imagem é a única forma de escanear
+  const qrDrawable = qr ? qrLayout(qr.matrix || [], cols, innerHeight).fits : true;
+
+  useEffect(() => {
+    if (!qr || qrDrawable || qrOpenedRef.current) return;
+    qrOpenedRef.current = true; // uma vez por pareamento, não a cada código novo
+    bridge.send('openqr');
+  }, [qr, qrDrawable, bridge]);
 
   const openFinder = () => {
     setFinderOpen(true);
@@ -258,6 +274,7 @@ export default function App({mouse}) {
       // a tela de QR cobre as demais: só as ações de pareamento respondem
       if (key.escape) { setQrHidden(true); return; }
       if (input === 'n' || input === 'N') runAction('novoqr');
+      else if (input === 'o' || input === 'O') bridge.send('openqr');
       else if (input === 'c' || input === 'C') bridge.send('cancelqr');
       return;
     }
@@ -331,11 +348,6 @@ export default function App({mouse}) {
     if (!currentChat) return;
     bridge.send('send', [currentChat.id, text]);
   };
-
-  const rows = stdout?.rows || 30;
-  const cols = stdout?.columns || 80;
-  const innerHeight = rows - 4; // cabeçalho (2) + taskbar (2)
-  const sessionHeight = innerHeight - 4; // prompt (3) + linha de dicas (1)
 
   // mouse: o emitter vem de index.mjs (stdin filtrado); o handler vive num
   // ref reatribuído a cada render para enxergar sempre o estado atual

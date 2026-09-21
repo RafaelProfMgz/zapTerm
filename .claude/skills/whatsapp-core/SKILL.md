@@ -28,6 +28,14 @@ description: Como funciona o pacote messages/ — conexão WhatsApp via whatsmeo
   `startLogin(true)` apaga o pareamento e força um QR novo. O QR vai para a
   UI pela interface (`UiMessageHandler.SetQRCode`), como matriz de módulos —
   o frontend desenha (mantendo a zona silenciosa, que o render antigo comia).
+  O código de pareamento tem ~300 caracteres = matriz ~73x73, ou seja ~44
+  linhas de terminal; quando não cabe, a UI manda `openqr` e o núcleo abre o
+  PNG (`qrPNGPath()`).
+- **Depurar conexão**: `ZAPTERM_DEBUG=1` (ou `=debug`) liga o log do whatsmeow
+  no stderr (`messages/debuglog.go`) — stdout é do protocolo NDJSON. Foi assim
+  que se viu o `Client outdated (405)`: quando o WhatsApp recusa a versão do
+  cliente, o canal de QR só emite `err-client-outdated` e fecha, e a correção
+  é atualizar a dependência `go.mau.fi/whatsmeow`.
 - Eventos: `eventHandler.Handle()` — `events.Message` →
   `handleLiveMessage()`; `events.HistorySync` → `handleHistorySync()`.
   Ambos normalizam via `normalizeEventMessage` → `messageFromInfo`
@@ -37,7 +45,7 @@ description: Como funciona o pacote messages/ — conexão WhatsApp via whatsmeo
   send, select, read, backlog, download/open/show/play, url, upload,
   sendimage/sendvideo/sendaudio, revoke, grupos (create/add/remove/admin/
   subject/leave), login/connect/reconectar/re-conect, novoqr, cancelqr,
-  logout/reset/disconnect. O evento `events.LoggedOut` volta pelo
+  logout/reset/disconnect, openqr (abre o PNG do código). O evento `events.LoggedOut` volta pelo
   `CommandChannel` como `__loggedout` (só o manager pode mexer no client) e,
   com `auto_reconnect`, já dispara um QR novo.
 
