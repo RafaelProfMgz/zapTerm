@@ -70,7 +70,8 @@ test('bridge: /reconectar traz o QR de pareamento e /cancelqr o encerra', async 
   bridge.send('reconectar');
   const qr = await qrP;
   assert.equal(qr.event, 'code');
-  assert.equal(qr.matrix.length, 4);
+  assert.equal(qr.matrix.length, 65, 'matriz do tamanho de um código real');
+  assert.equal(qr.matrix[0].length, 65);
   assert.ok(qr.png);
 
   const doneP = waitFor(bridge, 'qr');

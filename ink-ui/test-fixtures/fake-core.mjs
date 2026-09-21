@@ -46,7 +46,9 @@ rl.on('line', line => {
       type: 'qr',
       event: 'code',
       code: 'fake-pair-code',
-      matrix: ['1111', '1001', '1001', '1111'],
+      // matriz 65x65, do tamanho de um código de pareamento real (~277 chars)
+      matrix: Array.from({length: 65}, (_, y) =>
+        Array.from({length: 65}, (_, x) => ((x * 7 + y * 13) % 3 ? '1' : '0')).join('')),
       png: '/tmp/whatscli-qr.png',
       message: 'leia o QR code no celular',
     });

@@ -157,7 +157,7 @@ export default function SettingsScreen({version, status, binPath, height}) {
         h(Key, {key: 'pod', k: 'P/O/D', action: 'tocar áudio · abrir anexo · baixar (mensagem selecionada)'}),
         h(Key, {key: 'b', k: 'B', action: 'carregar histórico (backlog)'}),
         h(Key, {key: 'rec', k: 'CTRL+R', action: 'reconectar ao WhatsApp de qualquer tela'}),
-        h(Key, {key: 'cmd', k: '/CMD', action: 'comando do núcleo Go (/reconectar, /novoqr, /read…)'}),
+        h(Key, {key: 'cmd', k: '/CMD', action: 'comando do núcleo Go (/reconectar, /novoqr, /openqr, /read…)'}),
         h(Key, {key: 'q', k: 'CTRL+Q', action: 'sair'}),
       ]}),
     ),

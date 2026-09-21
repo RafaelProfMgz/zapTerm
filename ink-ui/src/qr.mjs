@@ -38,7 +38,23 @@ export function qrRuns(matrix) {
 // mais mandar o usuário abrir o PNG do que mostrar um QR cortado.
 export function qrFits(matrix, width, height) {
   if (!matrix || matrix.length === 0) return false;
-  return matrix[0].length <= width && Math.ceil(matrix.length / 2) <= height;
+  return matrix[0].length <= width && qrHeight(matrix) <= height;
+}
+
+// qrHeight: linhas de terminal que o desenho ocupa (dois módulos por linha).
+export function qrHeight(matrix) {
+  return Math.ceil((matrix?.length || 0) / 2);
+}
+
+// CHROME é o que a tela usa além do QR: título, mensagem e rodapé. Um código
+// de pareamento real tem ~277 caracteres = matriz 65x65, ou seja 33 linhas de
+// terminal — o enquadramento precisa ser apertado para caber em janelas
+// comuns, e os respiros só entram quando sobra espaço.
+export const CHROME = 3;
+
+export function qrLayout(matrix, width, height) {
+  const fits = qrFits(matrix, width - 2, height - CHROME);
+  return {fits, roomy: fits && qrFits(matrix, width - 2, height - CHROME - 3)};
 }
 
 function Code({matrix}) {
@@ -52,24 +68,35 @@ function Code({matrix}) {
 
 export default function QRScreen({qr, height, width}) {
   const matrix = qr?.matrix || [];
-  const fits = qrFits(matrix, width - 4, height - 8);
+  const {fits, roomy} = qrLayout(matrix, width, height);
+  // tudo em linhas/colunas do terminal inteiro (height é só o corpo: o app já
+  // gastou 4 linhas com cabeçalho e taskbar)
+  const need = `${matrix.length ? matrix[0].length : 0} colunas x ${qrHeight(matrix) + CHROME + 4} linhas`;
   return h(Box, {flexDirection: 'column', height, overflow: 'hidden', paddingX: 1},
     h(Text, {color: theme.primary, bold: true}, 'PAREAR_APARELHO'),
     h(Text, {color: theme.textDim, wrap: 'truncate'},
       qr?.message || 'aguardando o QR code do núcleo…'),
-    h(Text, null, ' '),
+    roomy ? h(Text, null, ' ') : null,
     fits
-      ? h(Box, {justifyContent: 'center'}, h(Code, {matrix}))
-      : h(Text, {color: theme.error},
+      ? h(Box, {justifyContent: 'center', flexShrink: 0}, h(Code, {matrix}))
+      : h(Box, {flexDirection: 'column', flexGrow: 1},
         matrix.length
-          ? 'terminal pequeno demais para desenhar o QR — abra a imagem abaixo'
-          : 'gerando o código…'),
-    h(Text, null, ' '),
-    qr?.png
+          ? h(React.Fragment, null,
+            h(Text, {color: theme.error, wrap: 'truncate'},
+              `a janela é pequena para desenhar o QR (precisa de ${need}, tem ${width} x ${height + 4})`),
+            h(Text, {color: theme.textDim, wrap: 'truncate'},
+              'abrimos a imagem do código no visualizador do sistema — ou diminua a fonte'),
+            h(Text, {color: theme.textDim, wrap: 'truncate'},
+              'do terminal (Ctrl+-) e aumente a janela para lê-lo aqui'),
+          )
+          : h(Text, {color: theme.textDim}, 'gerando o código…'),
+      ),
+    roomy ? h(Text, null, ' ') : null,
+    roomy && qr?.png
       ? h(Text, {color: theme.textDim, wrap: 'truncate'}, `imagem do QR: ${qr.png}`)
       : null,
     h(Box, {flexGrow: 1}),
-    h(Text, {color: theme.secondary},
-      '[N] novo QR · [C] cancelar · [ESC] esconder · [CTRL+R] reconectar'),
+    h(Text, {color: theme.secondary, wrap: 'truncate'},
+      '[O] abrir imagem · [N] novo QR · [C] cancelar · [ESC] esconder · [CTRL+R] reconectar'),
   );
 }

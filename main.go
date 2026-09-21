@@ -20,7 +20,7 @@ import (
 	"github.com/zyedidia/clipboard"
 )
 
-var VERSION string = "v2.1.0"
+var VERSION string = "v2.1.1"
 
 var sndTxt string = ""
 var currentReceiver messages.Chat = messages.Chat{}
@@ -935,6 +935,7 @@ func buildHelpText() string {
 	row(cmdPrefix+"reconectar / "+k.CommandConnect, "reconectar ao WhatsApp (mesma sessão)")
 	row(cmdPrefix+"novoqr", "apagar a sessão e ler um novo QR code")
 	row(cmdPrefix+"cancelqr", "cancelar a leitura do QR code em andamento")
+	row(cmdPrefix+"openqr", "abrir a imagem do QR code no visualizador do sistema")
 	row(cmdPrefix+"disconnect", "encerrar a conexão")
 	row(cmdPrefix+"logout", "remover o login deste computador")
 	row(cmdPrefix+"reset", "limpar a sessão e reconectar do zero")

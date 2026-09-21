@@ -164,9 +164,23 @@ reconectar na mão:
 | `/reconectar` (ou `/re-conect`, `/connect`) | reconectar com a sessão atual |
 | `/novoqr` | apagar a sessão e ler um QR novo |
 | `/cancelqr` | cancelar a leitura do QR em andamento |
+| `/openqr` | abrir a imagem do QR no visualizador do sistema |
 | `/logout` | sair da conta neste computador |
 
-Na tela do QR: `[N]` gera outro código, `[C]` cancela e `[ESC]` esconde sem cancelar.
+Na tela do QR: `[O]` abre a imagem, `[N]` gera outro código, `[C]` cancela e `[ESC]`
+esconde sem cancelar.
+
+O código de pareamento do WhatsApp é grande (matriz de ~73x73 módulos), então desenhá-lo
+no terminal exige uma janela de **~44 linhas**. Em janelas menores o ZapTerm abre sozinho
+a imagem `~/.config/whatscli/whatscli-qr.png` — ou diminua a fonte do terminal (`Ctrl+-`)
+e amplie a janela para lê-lo direto na tela.
+
+### Diagnóstico de conexão
+
+Se o QR não aparece ou a conexão falha, rode com `ZAPTERM_DEBUG=1` (ou `=debug` para o
+rastreio completo do protocolo): os logs da biblioteca do WhatsApp saem no **stderr**, sem
+atrapalhar a interface. É assim que se vê, por exemplo, um `Client outdated (405)` — que
+significa que a biblioteca `whatsmeow` precisa ser atualizada.
 
 ### Mensagens e comandos
 

@@ -25,7 +25,6 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -34,6 +33,14 @@ var urlPattern = regexp.MustCompile(`https?://[^\s]+`)
 // loggedOutCommand is queued by the whatsmeow event handler when the phone
 // unpairs this device; the "__" prefix keeps it out of reach of typed commands.
 const loggedOutCommand = "__loggedout"
+
+// qrPNGPath is where the login QR is saved as an image. A real pairing code is
+// ~277 characters, which draws a 65x65 module matrix — about 33 terminal rows
+// even at half height — so on smaller windows the image is the only way to
+// scan it. The path is deterministic so any goroutine can derive it.
+func qrPNGPath() string {
+	return filepath.Join(filepath.Dir(config.GetSessionFilePath()), "whatscli-qr.png")
+}
 
 // SessionManager deals with the connection and receives commands from the UI.
 type SessionManager struct {
@@ -214,7 +221,7 @@ func (sm *SessionManager) getCurrentReceiver() string {
 func (sm *SessionManager) getConnection() (*whatsmeow.Client, error) {
 	if sm.client == nil {
 		dbPath := config.GetSessionFilePath() + ".db"
-		container, err := sqlstore.New(context.Background(), "sqlite3", "file:"+dbPath+"?_foreign_keys=on", waLog.Noop)
+		container, err := sqlstore.New(context.Background(), "sqlite3", "file:"+dbPath+"?_foreign_keys=on", waLogger("db"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to database: %v", err)
 		}
@@ -222,7 +229,7 @@ func (sm *SessionManager) getConnection() (*whatsmeow.Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to get device: %v", err)
 		}
-		client := whatsmeow.NewClient(deviceStore, waLog.Noop)
+		client := whatsmeow.NewClient(deviceStore, waLogger("wa"))
 		client.AddEventHandler(sm.eventHandler.Handle)
 		sm.client = client
 		sm.container = container
@@ -370,7 +377,7 @@ func (sm *SessionManager) waitForQRCode(ctx context.Context, client *whatsmeow.C
 		return fmt.Errorf("erro ao conectar no WhatsApp: %v", err)
 	}
 
-	pngPath := filepath.Join(filepath.Dir(config.GetSessionFilePath()), "whatscli-qr.png")
+	pngPath := qrPNGPath()
 	for evt := range qrChan {
 		switch evt.Event {
 		case "code":
@@ -559,6 +566,15 @@ func (sm *SessionManager) execCommand(command Command) {
 		sm.startLogin(true)
 	case "cancelqr", "cancelar":
 		sm.cancelLogin()
+	case "openqr", "abrirqr":
+		// abre a imagem do QR no visualizador do sistema — saída para quando a
+		// janela do terminal é pequena demais para desenhar o código
+		path := qrPNGPath()
+		if _, err := os.Stat(path); err != nil {
+			sm.uiHandler.PrintError(errors.New("nenhum QR code salvo ainda — use " + config.Config.General.CmdPrefix + "novoqr"))
+			return
+		}
+		sm.uiHandler.OpenFile(path)
 	case loggedOutCommand:
 		sm.handlePhoneLogout()
 	case "reset":

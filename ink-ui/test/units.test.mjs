@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {filterChats, sortChats, chatRows, rowScrollStart, shortTime} from '../src/chatlist.mjs';
 import {fuzzyMatch, searchChats, rawJid} from '../src/finder.mjs';
 import {kindLabel, storyPreview} from '../src/stories.mjs';
-import {qrRuns, qrFits} from '../src/qr.mjs';
+import {qrRuns, qrFits, qrHeight, qrLayout, CHROME} from '../src/qr.mjs';
 import {settingsActionAt, settingsActionForKey, ACTIONS_ROW} from '../src/settings.mjs';
 
 const CHATS = [
@@ -119,4 +119,22 @@ test('settingsActionForKey: atalhos aceitam maiúscula e minúscula', () => {
   assert.equal(settingsActionForKey('r').cmd, 'reconectar');
   assert.equal(settingsActionForKey('N').cmd, 'novoqr');
   assert.equal(settingsActionForKey('x'), null);
+});
+
+// Um código de pareamento real (~277 caracteres) vira uma matriz 65x65 — 33
+// linhas de terminal. É o caso que decide entre desenhar e abrir a imagem.
+const REAL_QR = Array.from({length: 65}, () => '0'.repeat(65));
+
+test('qrHeight: dois módulos por linha do terminal', () => {
+  assert.equal(qrHeight(REAL_QR), 33);
+  assert.equal(qrHeight(['0', '0', '0']), 2, 'linha ímpar ocupa uma linha inteira');
+});
+
+test('qrLayout: QR real só cabe a partir de 40 linhas de terminal', () => {
+  // height é o corpo (a tela toda menos as 4 linhas de cabeçalho/taskbar)
+  assert.equal(qrLayout(REAL_QR, 90, 33 + CHROME).fits, true);
+  assert.equal(qrLayout(REAL_QR, 90, 33 + CHROME - 1).fits, false);
+  assert.equal(qrLayout(REAL_QR, 66, 40).fits, false, 'largura conta a moldura');
+  assert.equal(qrLayout(REAL_QR, 90, 33 + CHROME).roomy, false, 'justo: sem respiros');
+  assert.equal(qrLayout(REAL_QR, 90, 33 + CHROME + 3).roomy, true);
 });
