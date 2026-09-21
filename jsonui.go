@@ -125,9 +125,26 @@ func (j *JsonUiHandler) PlayFile(path string, msgId string) {
 
 func (j *JsonUiHandler) SetStatus(status messages.SessionStatus) {
 	j.emit(map[string]any{
-		"type":      "status",
-		"connected": status.Connected,
-		"lastSeen":  status.LastSeen,
+		"type":       "status",
+		"connected":  status.Connected,
+		"lastSeen":   status.LastSeen,
+		"loggedIn":   status.LoggedIn,
+		"connecting": status.Connecting,
+		"needsLogin": status.NeedsLogin,
+	})
+}
+
+// SetQRCode forwards the login QR state; the frontend draws the matrix itself
+// (one string per row, '1' = dark module) so the code keeps its quiet zone and
+// stays scannable.
+func (j *JsonUiHandler) SetQRCode(qr messages.QRCode) {
+	j.emit(map[string]any{
+		"type":    "qr",
+		"event":   string(qr.Event),
+		"code":    qr.Code,
+		"matrix":  qr.Matrix,
+		"png":     qr.PngPath,
+		"message": qr.Message,
 	})
 }
 

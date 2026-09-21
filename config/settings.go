@@ -47,6 +47,10 @@ type General struct {
 	// AudioCommand is the player used for audio messages (e.g. "mpv --no-video").
 	// Leave empty to auto-detect mpv, ffplay, play (sox) or cvlc.
 	AudioCommand string
+	// AutoReconnect generates a new QR code by itself when the session ends
+	// (device unpaired from the phone). With it off, the user reconnects from
+	// the CONFIG screen or with the /reconectar command.
+	AutoReconnect bool
 }
 
 type Keymap struct {
@@ -134,6 +138,7 @@ var Config = IniFile{
 		InlineImages:             true,
 		InlineImageLines:         14,
 		AudioCommand:             "",
+		AutoReconnect:            true,
 	},
 	&Keymap{
 		SwitchPanels:    "Tab",

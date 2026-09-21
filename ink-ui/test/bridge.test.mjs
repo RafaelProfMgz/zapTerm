@@ -61,6 +61,28 @@ test('bridge: comando select devolve a tela de mensagens', async () => {
   await exitP;
 });
 
+test('bridge: /reconectar traz o QR de pareamento e /cancelqr o encerra', async () => {
+  const bridge = createBridge();
+  bridge.start();
+  await waitFor(bridge, 'ready');
+
+  const qrP = waitFor(bridge, 'qr');
+  bridge.send('reconectar');
+  const qr = await qrP;
+  assert.equal(qr.event, 'code');
+  assert.equal(qr.matrix.length, 4);
+  assert.ok(qr.png);
+
+  const doneP = waitFor(bridge, 'qr');
+  bridge.send('cancelqr');
+  const done = await doneP;
+  assert.equal(done.event, 'done');
+
+  const exitP = waitFor(bridge, 'exit');
+  bridge.quit();
+  await exitP;
+});
+
 test('bridge: eventos chegados antes do start() são bufferizados', async () => {
   const bridge = createBridge();
   // sem chamar start() imediatamente: dá tempo de o fake-core emitir

@@ -14,6 +14,7 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/normen/whatscli/config"
 	"github.com/normen/whatscli/messages"
+	"github.com/normen/whatscli/qrcode"
 	"github.com/rivo/tview"
 	"github.com/skratchdot/open-golang/open"
 	"github.com/zyedidia/clipboard"
@@ -931,7 +932,9 @@ func buildHelpText() string {
 	row("Esc", "sair do modo de seleção de mensagem")
 
 	sec("Conexão")
-	row(cmdPrefix+"connect / "+k.CommandConnect, "(re)conectar ao WhatsApp")
+	row(cmdPrefix+"reconectar / "+k.CommandConnect, "reconectar ao WhatsApp (mesma sessão)")
+	row(cmdPrefix+"novoqr", "apagar a sessão e ler um novo QR code")
+	row(cmdPrefix+"cancelqr", "cancelar a leitura do QR code em andamento")
 	row(cmdPrefix+"disconnect", "encerrar a conexão")
 	row(cmdPrefix+"logout", "remover o login deste computador")
 	row(cmdPrefix+"reset", "limpar a sessão e reconectar do zero")
@@ -1345,6 +1348,40 @@ func (u UiHandler) PlayFile(path string, msgId string) {
 
 func (u UiHandler) OpenFile(path string) {
 	open.Run(path)
+}
+
+// qrPngOpened keeps the login QR image from popping up again on every refresh
+// of the code (whatsmeow emits a new one every ~20s).
+var qrPngOpened bool
+
+// SetQRCode renders the login QR in the message panel. The tview drawing has no
+// quiet zone and often will not scan, so the saved PNG is opened once as a
+// fallback.
+func (u UiHandler) SetQRCode(qr messages.QRCode) {
+	switch qr.Event {
+	case messages.QRCodeShow:
+		go app.QueueUpdateDraw(func() {
+			PrintText(qr.Message)
+			terminal := qrcode.New()
+			terminal.SetOutput(tview.ANSIWriter(textView))
+			terminal.Get(qr.Code).Print()
+			if qr.PngPath != "" {
+				PrintText("QR também salvo em " + tview.Escape(qr.PngPath))
+				if !qrPngOpened {
+					qrPngOpened = true
+					open.Run(qr.PngPath)
+				}
+			}
+		})
+	default:
+		// o flag vive na thread da UI, junto com quem o lê
+		go app.QueueUpdateDraw(func() {
+			qrPngOpened = false
+			if qr.Message != "" {
+				PrintText(qr.Message)
+			}
+		})
+	}
 }
 
 func (u UiHandler) SetStatus(status messages.SessionStatus) {
