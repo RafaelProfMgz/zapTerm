@@ -76,9 +76,12 @@ export function createBridge() {
       for (const msg of pending.splice(0)) events.emit('ev:' + msg.type, msg);
     },
     // send('select', [chatId]) → {"cmd":"select","params":["..."]}
-    send: (cmd, params = []) => {
+    // account (opcional) manda o comando para aquela conta; sem ele, vai para
+    // a conta ativa
+    send: (cmd, params = [], account) => {
       try {
-        proc.stdin.write(JSON.stringify({cmd, params}) + '\n');
+        const msg = account ? {cmd, account, params} : {cmd, params};
+        proc.stdin.write(JSON.stringify(msg) + '\n');
       } catch {
         // processo já morreu; o evento 'exit' cuida do resto
       }

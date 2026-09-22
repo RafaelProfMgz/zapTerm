@@ -125,7 +125,7 @@ export default function SettingsScreen({version, status, binPath, height}) {
     h(Box, {flexShrink: 0},
       h(Card, {title: 'ARQUIVOS_DO_SISTEMA', grow: true, children: [
         h(Field, {key: 'cfg', label: 'CONFIG ', value: '~/.config/whatscli/whatscli.config'}),
-        h(Field, {key: 'db', label: 'SESSÃO ', value: '~/.config/whatscli/session.db'}),
+        h(Field, {key: 'db', label: 'SESSÃO ', value: '~/.config/whatscli/accounts/default/session.db'}),
       ]}),
       h(Card, {title: 'NÚCLEO_GO', grow: true, children: [
         h(Field, {key: 'bin', label: 'BINÁRIO', value: binPath || '?'}),

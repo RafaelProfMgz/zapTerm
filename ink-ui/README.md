@@ -24,6 +24,13 @@ app só desenha a interface e devolve comandos.
 - Lado Go: `jsonui.go` (handler `UiMessageHandler` headless) — flag `--ui=json`.
 - Lado Node: `src/bridge.mjs` sobe o binário e troca NDJSON; `src/app.mjs`
   monta a interface.
+- Várias contas: todo evento de sessão leva `"account":"<id>"`; comandos
+  aceitam `{"cmd":"...","account":"<id>","params":[...]}` e, sem `account`,
+  vão para a conta ativa (`bridge.send(cmd, params, account)`). Eventos de
+  conta: `accounts` (`{active, accounts:[{id,label,jid,connected,…}]}`) e
+  `account` (`{id}`, troca de conta ativa — a UI zera o estado e o núcleo
+  reenvia chats/status/QR da nova). Por enquanto a UI mostra só a conta ativa
+  (eventos das outras são descartados, exceto erros).
 
 ## Como rodar
 
@@ -99,7 +106,7 @@ posts do autor selecionado à direita. `↑/↓` ou rolagem navegam os contatos.
 ## Cache local
 
 As conversas e os últimos ~100 recados de cada chat ficam num JSON leve em
-`~/.config/whatscli/cache.json` (gravação com *debounce* de 2s + flush ao sair).
+`~/.config/whatscli/accounts/<conta>/cache.json` (gravação com *debounce* de 2s + flush ao sair).
 Assim a lista de conversas e os stories já aparecem na abertura, antes mesmo de
 o WhatsApp sincronizar. O cache não guarda o proto bruto das mensagens (download
 de mídia só funciona online). Lado Go: `messages/cache.go`.

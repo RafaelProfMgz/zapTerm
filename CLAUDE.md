@@ -26,13 +26,14 @@ make release     # tag + workflow de release (GitHub Actions)
 | `images.go` | Imagens inline em half-block |
 | `audio.go` | Player de áudio de mensagens de voz |
 | `messages/` | Tudo de WhatsApp: conexão, eventos, comandos, storage, bot IA |
-| `config/` | INI do usuário (`~/.config/whatscli/whatscli.config`) e defaults |
+| `config/` | INI do usuário (`~/.config/whatscli/whatscli.config`), defaults e registro de contas (`accounts.go`) |
 | `packaging/`, `assets/` | Scripts de instalação e ícones usados pelo `make dist` |
 
 ## Arquitetura em 5 linhas
 
 - `main` (UI) e `messages` (WhatsApp) são isolados: UI envia
-  `messages.Command` pelo `CommandChannel`; o manager responde pela interface
+  `messages.Command` por `accountManager.Send` (um `SessionManager` por
+  conta, `messages/accounts.go`); o manager responde pela interface
   `UiMessageHandler` — cujas implementações em `main.go` envolvem tudo em
   `go app.QueueUpdateDraw(...)`.
 - O `SessionManager` roda em goroutine própria; storage de mensagens é em

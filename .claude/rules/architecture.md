@@ -16,11 +16,17 @@ abaixo são regras, não sugestões.
 
 ## Modelo de threads (a regra mais importante)
 
-- A UI roda no event loop do tview. O `SessionManager` roda em goroutine
-  própria (`runManager` em `messages/session_manager.go`), consumindo canais.
-- **UI → manager**: sempre via `sessionManager.CommandChannel <-
-  messages.Command{nome, params}`. Nunca chamar métodos do manager
-  diretamente da UI.
+- A UI roda no event loop do tview. Cada conta tem um `SessionManager` em
+  goroutine própria (`runManager` em `messages/session_manager.go`),
+  consumindo canais; o `AccountManager` (`messages/accounts.go`) cria um por
+  conta de `accounts.json` e roteia os comandos.
+- **UI → manager**: sempre via `accountManager.Send(conta, messages.Command{nome,
+  params})` (conta `""` = ativa), que termina no `CommandChannel` da conta.
+  Nunca chamar métodos do `SessionManager` diretamente da UI.
+- **Manager → UI por conta**: a UI implementa `UiAccountHandler`; o
+  `ForAccount(id)` dela devolve o `UiMessageHandler` da conta (o JSON carimba
+  `"account"` em todo evento; o tview, em `accounts_ui.go`, só repassa a conta
+  ativa). O `SessionManager` não sabe de contas.
 - **Manager → UI**: sempre via métodos de `UiMessageHandler`. Toda
   implementação em `main.go` (struct `UiHandler`) que mexe em widget DEVE
   envolver o trabalho em `go app.QueueUpdateDraw(func() { ... })`.
@@ -33,17 +39,21 @@ abaixo são regras, não sugestões.
 ## Fluxo de comandos
 
 Texto digitado com prefixo `/` (config `cmd_prefix`) vira `Command` em
-`EnterCommand` (`main.go`) → `CommandChannel` → switch em `execCommand`
-(`messages/session_manager.go`). Para criar um comando novo: adicionar `case`
-em `execCommand` + entrada na ajuda (`buildHelpText` em `main.go`).
+`EnterCommand` (`main.go`) → `accountManager.Send` → `CommandChannel` da
+conta → switch em `execCommand` (`messages/session_manager.go`). Os comandos
+de conta (`/contas`, `/conta ...`) param no `AccountManager.Send`. Para criar
+um comando novo: adicionar `case` em `execCommand` (ou em `accountCommand`, se
+for de contas) + entrada na ajuda (`buildHelpText` em `main.go`).
 
 ## Persistência
 
 - Mensagens/chats ficam **em memória** (`MessageDatabase` em
   `messages/storage.go`, maps com RWMutex). Não há persistência própria —
   o histórico vem do history sync do whatsmeow.
-- A sessão do WhatsApp persiste no SQLite do whatsmeow em
-  `config.GetSessionFilePath() + ".db"` (`~/.config/whatscli/session.db`).
+- A sessão do WhatsApp persiste no SQLite do whatsmeow, um por conta:
+  `config.GetSessionFilePathFor(id) + ".db"`
+  (`~/.config/whatscli/accounts/<id>/session.db`); o cache local fica ao lado
+  (`cache.json`). Registro das contas: `~/.config/whatscli/accounts.json`.
 - Config do usuário: `~/.config/whatscli/whatscli.config` (INI).
 
 ## Versão

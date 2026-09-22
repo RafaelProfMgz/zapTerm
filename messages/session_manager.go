@@ -34,16 +34,37 @@ var urlPattern = regexp.MustCompile(`https?://[^\s]+`)
 // unpairs this device; the "__" prefix keeps it out of reach of typed commands.
 const loggedOutCommand = "__loggedout"
 
+// resyncCommand re-publishes chats, stories and status (and clears the open
+// chat) so a UI that just switched to this account can redraw from scratch.
+const resyncCommand = "__resync"
+
+// stopCommand ends runManager; sent by Stop when an account is removed.
+const stopCommand = "__stop"
+
 // qrPNGPath is where the login QR is saved as an image. A real pairing code is
 // ~277 characters, which draws a 65x65 module matrix — about 33 terminal rows
 // even at half height — so on smaller windows the image is the only way to
 // scan it. The path is deterministic so any goroutine can derive it.
-func qrPNGPath() string {
-	return filepath.Join(filepath.Dir(config.GetSessionFilePath()), "whatscli-qr.png")
+func (sm *SessionManager) qrPNGPath() string {
+	return config.GetQRFilePathFor(sm.AccountID)
+}
+
+// sessionDBPath is the whatsmeow SQLite file of this manager's account.
+func (sm *SessionManager) sessionDBPath() string {
+	return config.GetSessionFilePathFor(sm.AccountID) + ".db"
+}
+
+// cachePath is the local conversation cache of this manager's account.
+func (sm *SessionManager) cachePath() string {
+	return config.GetCacheFilePathFor(sm.AccountID)
 }
 
 // SessionManager deals with the connection and receives commands from the UI.
 type SessionManager struct {
+	// AccountID selects the account folder (session, cache, QR) under
+	// ~/.config/whatscli/accounts/. Set it before Init; empty means the
+	// default account. Never changes afterwards, so any goroutine may read it.
+	AccountID       string
 	db              *MessageDatabase
 	currentReceiver string
 	uiHandler       UiMessageHandler
@@ -71,7 +92,8 @@ type SessionManager struct {
 	cacheLock       sync.Mutex   // guards cacheTimer
 	loggingIn       atomic.Bool  // a login/reconnect attempt is in flight
 	qrCancel        context.CancelFunc
-	pendingLogin    *bool // login requested while another one was unwinding
+	pendingLogin    *bool         // login requested while another one was unwinding
+	done            chan struct{} // closed when runManager returns
 }
 
 // loginResult is what the async login goroutine reports back to the manager
@@ -86,6 +108,9 @@ type loginResult struct {
 
 // Init initializes the SessionManager.
 func (sm *SessionManager) Init(handler UiMessageHandler) {
+	if sm.AccountID == "" {
+		sm.AccountID = config.DefaultAccountID
+	}
 	sm.db = &MessageDatabase{}
 	sm.db.Init()
 	sm.uiHandler = handler
@@ -99,6 +124,7 @@ func (sm *SessionManager) Init(handler UiMessageHandler) {
 	sm.eventHandler = &eventHandler{sm: sm}
 	sm.userKeys = make(map[string]string)
 	sm.aiChats = make(map[string]*aiChatState)
+	sm.done = make(chan struct{})
 }
 
 // StartManager starts the receiver and message handling goroutine.
@@ -129,7 +155,7 @@ func (sm *SessionManager) scheduleCacheSave() {
 		sm.cacheTimer.Stop()
 	}
 	sm.cacheTimer = time.AfterFunc(2*time.Second, func() {
-		if err := sm.db.SaveCache(config.GetCacheFilePath()); err != nil {
+		if err := sm.db.SaveCache(sm.cachePath()); err != nil {
 			sm.uiHandler.PrintError(err)
 		}
 	})
@@ -144,7 +170,7 @@ func (sm *SessionManager) flushCache() {
 		sm.cacheTimer = nil
 	}
 	sm.cacheLock.Unlock()
-	if err := sm.db.SaveCache(config.GetCacheFilePath()); err != nil {
+	if err := sm.db.SaveCache(sm.cachePath()); err != nil {
 		sm.uiHandler.PrintError(err)
 	}
 }
@@ -155,9 +181,26 @@ func (sm *SessionManager) FlushCache() {
 	sm.flushCache()
 }
 
+// Stop ends the manager goroutine (flushing the cache and disconnecting) and
+// waits for it, so the account folder can be deleted safely afterwards.
+// Commands queued before it (e.g. "logout") still run first.
+func (sm *SessionManager) Stop(timeout time.Duration) error {
+	if !sm.started {
+		return nil
+	}
+	sm.CommandChannel <- Command{stopCommand, nil}
+	select {
+	case <-sm.done:
+		return nil
+	case <-time.After(timeout):
+		return errors.New("o gerenciador da conta não parou a tempo")
+	}
+}
+
 func (sm *SessionManager) runManager() error {
+	defer close(sm.done)
 	// show cached conversations immediately, before WhatsApp connects
-	if err := sm.db.LoadCache(config.GetCacheFilePath()); err != nil {
+	if err := sm.db.LoadCache(sm.cachePath()); err != nil {
 		sm.uiHandler.PrintError(err)
 	}
 	sm.uiHandler.SetChats(sm.db.GetChatIds())
@@ -220,7 +263,7 @@ func (sm *SessionManager) getCurrentReceiver() string {
 
 func (sm *SessionManager) getConnection() (*whatsmeow.Client, error) {
 	if sm.client == nil {
-		dbPath := config.GetSessionFilePath() + ".db"
+		dbPath := sm.sessionDBPath()
 		container, err := sqlstore.New(context.Background(), "sqlite3", "file:"+dbPath+"?_foreign_keys=on", waLogger("db"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to database: %v", err)
@@ -315,6 +358,10 @@ func (sm *SessionManager) handleLoginResult(res loginResult) {
 		p := config.Config.General.CmdPrefix
 		sm.uiHandler.PrintError(fmt.Errorf("falha ao conectar no WhatsApp: %v", res.err))
 		sm.uiHandler.PrintText("use " + p + "reconectar para tentar de novo ou " + p + "novoqr para ler um novo QR code")
+	} else if sm.client != nil && sm.client.Store != nil && sm.client.Store.ID != nil {
+		// remember which number this account is paired with (shown in the
+		// account list); failing to write it is not worth bothering the user
+		config.SetAccountJID(sm.AccountID, sm.client.Store.ID.ToNonAD().String())
 	}
 	sm.refreshStatus()
 }
@@ -377,7 +424,7 @@ func (sm *SessionManager) waitForQRCode(ctx context.Context, client *whatsmeow.C
 		return fmt.Errorf("erro ao conectar no WhatsApp: %v", err)
 	}
 
-	pngPath := qrPNGPath()
+	pngPath := sm.qrPNGPath()
 	for evt := range qrChan {
 		switch evt.Event {
 		case "code":
@@ -569,7 +616,7 @@ func (sm *SessionManager) execCommand(command Command) {
 	case "openqr", "abrirqr":
 		// abre a imagem do QR no visualizador do sistema — saída para quando a
 		// janela do terminal é pequena demais para desenhar o código
-		path := qrPNGPath()
+		path := sm.qrPNGPath()
 		if _, err := os.Stat(path); err != nil {
 			sm.uiHandler.PrintError(errors.New("nenhum QR code salvo ainda — use " + config.Config.General.CmdPrefix + "novoqr"))
 			return
@@ -577,6 +624,17 @@ func (sm *SessionManager) execCommand(command Command) {
 		sm.uiHandler.OpenFile(path)
 	case loggedOutCommand:
 		sm.handlePhoneLogout()
+	case resyncCommand:
+		sm.currentRecvLock.Lock()
+		sm.currentReceiver = ""
+		sm.currentRecvLock.Unlock()
+		sm.uiHandler.SetChats(sm.db.GetChatIds())
+		sm.uiHandler.SetStories(sm.db.GetStatusUpdates())
+		sm.uiHandler.NewScreen(nil)
+		sm.refreshStatus()
+	case stopCommand:
+		sm.cancelLogin()
+		sm.started = false // runManager leaves its loop after this command
 	case "reset":
 		sm.resetSession()
 	case "disconnect":
@@ -717,7 +775,7 @@ func (sm *SessionManager) loadBacklog() {
 func (sm *SessionManager) resetSession() {
 	sm.cancelLogin()
 	sm.clearStoredSession() // desconecta, apaga o pareamento e fecha o SQLite
-	dbPath := config.GetSessionFilePath() + ".db"
+	dbPath := sm.sessionDBPath()
 	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
 		sm.uiHandler.PrintText("Aviso: não foi possível remover o arquivo da sessão: " + err.Error())
 	}

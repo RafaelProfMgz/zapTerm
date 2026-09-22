@@ -24,7 +24,7 @@ O `SessionManager` já guarda tudo o que precisa em campos próprios (db, client
 canais, estado do bot), então **várias instâncias convivem** assim que os
 caminhos de arquivo e o roteamento de eventos deixarem de ser globais.
 
-## Fase 1 — caminhos por conta + registro (sem mudança visível)
+## Fase 1 — caminhos por conta + registro (sem mudança visível) — FEITA
 
 1. `config/accounts.go`: registro em `~/.config/whatscli/accounts.json`
    ```json
@@ -44,7 +44,7 @@ caminhos de arquivo e o roteamento de eventos deixarem de ser globais.
 Teste: subir o binário com um `XDG_CONFIG_HOME` contendo a estrutura antiga e
 conferir que a sessão foi migrada e continua conectando.
 
-## Fase 2 — `AccountManager` + campo `account` no protocolo
+## Fase 2 — `AccountManager` + campo `account` no protocolo — FEITA
 
 1. `messages/accounts.go`:
    ```go
@@ -73,6 +73,18 @@ conferir que a sessão foi migrada e continua conectando.
 
 Teste: `fake-core.mjs` ganha duas contas e o teste do bridge confere que um
 `select` com `account` só mexe naquela conta.
+
+Como ficou (difere do rascunho acima em dois pontos):
+
+- Em vez de uma interface com todos os métodos duplicados com `accountID`, o
+  `UiAccountHandler` tem `ForAccount(id) UiMessageHandler`: o JSON devolve um
+  handler filho que carimba `"account"`; o tview devolve um filtro que só
+  repassa a conta ativa (`accounts_ui.go`). O decorador `accountHandler`
+  guarda status/QR por conta para reenviar na troca.
+- O tview também passou a usar o `AccountManager` (troca por `/conta`, sem
+  barra lateral), e o Ink, até a Fase 3, descarta eventos das contas
+  inativas — a troca zera o estado e o núcleo reenvia tudo (`__resync`).
+- O limite de 5 contas (`config.MaxAccounts`) já entrou aqui.
 
 ## Fase 3 — barra lateral de contas no Ink
 

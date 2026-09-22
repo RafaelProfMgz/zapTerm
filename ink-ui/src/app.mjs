@@ -119,6 +119,8 @@ export default function App({mouse}) {
   const [qr, setQr] = useState(null); // {matrix, png, message} do login por QR
   const [qrHidden, setQrHidden] = useState(false); // ESC esconde sem cancelar
   const [version, setVersion] = useState('');
+  const [accounts, setAccounts] = useState([]); // [{id, label, jid, connected…}]
+  const [activeId, setActiveId] = useState('');
   const [currentChat, setCurrentChat] = useState(null);
   const [playingId, setPlayingId] = useState('');
   const [screen, setScreen] = useState('session');
@@ -138,6 +140,10 @@ export default function App({mouse}) {
   currentChatRef.current = currentChat;
   const connRef = useRef(false); // detecta transição de conexão p/ logar no feed
   const qrOpenedRef = useRef(false); // já abrimos a imagem deste pareamento?
+  // conta ativa: por enquanto a UI só mostra uma conta; eventos de outras são
+  // descartados e reenviados pelo núcleo quando a conta vira ativa
+  const activeIdRef = useRef('');
+  const accountsRef = useRef([]);
   const mouseRef = useRef(null); // handler de mouse — atribuído mais abaixo
 
   useEffect(() => {
@@ -150,20 +156,44 @@ export default function App({mouse}) {
   useEffect(() => {
     const pushLog = (kind, text) =>
       setLog(l => [...l.slice(-300), {kind, text, stamp: nowStamp()}]);
+    // evento sem "account" (núcleo antigo, eventos globais) vale sempre
+    const mine = e => !e.account || !activeIdRef.current || e.account === activeIdRef.current;
+    const on = (type, fn) => bridge.on(type, e => { if (mine(e)) fn(e); });
+    const labelOf = id => accountsRef.current.find(a => a.id === id)?.label || id;
     bridge.on('ready', e => setVersion(e.version || ''));
-    bridge.on('chats', e => setChats(e.chats || []));
-    bridge.on('stories', e => {
+    bridge.on('accounts', e => {
+      accountsRef.current = e.accounts || [];
+      setAccounts(accountsRef.current);
+    });
+    bridge.on('account', e => {
+      // troca de conta: zera o estado da anterior; chats/status/QR da nova
+      // chegam logo em seguida
+      activeIdRef.current = e.id || '';
+      setActiveId(activeIdRef.current);
+      setChats([]);
+      setStories([]);
+      setMsgs([]);
+      setSelMsg(null);
+      setSelChat(0);
+      setCurrentChat(null);
+      setQr(null);
+      setQrHidden(false);
+      qrOpenedRef.current = false;
+      if (accountsRef.current.length > 1) pushLog('net', `[CONTA] ${labelOf(e.id)}`);
+    });
+    on('chats', e => setChats(e.chats || []));
+    on('stories', e => {
       const list = e.stories || [];
       setStories(list);
       setStorySel(s => Math.max(0, Math.min(s, Math.max(0, list.length - 1))));
     });
-    bridge.on('screen', e => { setMsgs(e.messages || []); setSelMsg(null); });
-    bridge.on('message', e => {
+    on('screen', e => { setMsgs(e.messages || []); setSelMsg(null); });
+    on('message', e => {
       if (e.message && currentChatRef.current && e.message.chatId === currentChatRef.current.id) {
         setMsgs(m => [...m, e.message]);
       }
     });
-    bridge.on('status', e => {
+    on('status', e => {
       const connected = !!e.connected;
       if (connRef.current !== connected) {
         connRef.current = connected;
@@ -179,7 +209,7 @@ export default function App({mouse}) {
         needsLogin: !!e.needsLogin,
       });
     });
-    bridge.on('qr', e => {
+    on('qr', e => {
       if (e.event === 'code') {
         setQr({matrix: e.matrix || [], png: e.png || '', message: e.message || ''});
       } else {
@@ -191,9 +221,10 @@ export default function App({mouse}) {
       if (e.message) pushLog('net', e.message);
     });
     bridge.on('playing', e => setPlayingId(e.msgId || ''));
-    bridge.on('text', e => pushLog('text', e.text));
-    bridge.on('error', e => pushLog('error', e.text));
-    bridge.on('file', e => pushLog('text', `arquivo salvo: ${e.path}`));
+    on('text', e => pushLog('text', e.text));
+    // erro de conta em segundo plano ainda aparece, com o nome da conta
+    bridge.on('error', e => pushLog('error', mine(e) ? e.text : `[${labelOf(e.account)}] ${e.text}`));
+    on('file', e => pushLog('text', `arquivo salvo: ${e.path}`));
     bridge.on('exit', () => exit());
     bridge.start(); // listeners prontos: descarrega eventos chegados cedo
     return () => bridge.quit();
@@ -509,6 +540,9 @@ export default function App({mouse}) {
       h(Text, {wrap: 'truncate'},
         h(Text, {color: theme.primary, bold: true}, 'ZAPTERM PROTOCOL'),
         h(Text, {color: theme.secondary}, version ? ` ${version}` : ''),
+        accounts.length > 1
+          ? h(Text, {color: theme.primary}, ` [${(accounts.find(a => a.id === activeId)?.label || activeId).toUpperCase()}]`)
+          : null,
         h(Text, {color: theme.outlineDim}, ' — '),
         h(Text, {color: status.connected ? theme.textDim : status.connecting ? theme.secondary : theme.error},
           status.connected ? 'CONEXÃO CRIPTOGRAFADA'

@@ -146,7 +146,7 @@ A ajuda completa, comandos e atalhos estão dentro do app: digite `/help` (ou te
 ### Login
 
 Ao iniciar, o ZapTerm tenta conectar e mostra um **QR Code** desenhado no terminal
-(também salvo como imagem em `~/.config/whatscli/whatscli-qr.png`). Escaneie com o
+(também salvo como imagem em `~/.config/whatscli/accounts/default/whatscli-qr.png`). Escaneie com o
 WhatsApp do celular em *Aparelhos conectados > Conectar aparelho*. Se o QR não couber na
 tela, diminua a fonte do terminal ou aumente a janela. Depois da primeira vez, ele
 reconecta sozinho.
@@ -172,7 +172,7 @@ esconde sem cancelar.
 
 O código de pareamento do WhatsApp é grande (matriz de ~73x73 módulos), então desenhá-lo
 no terminal exige uma janela de **~44 linhas**. Em janelas menores o ZapTerm abre sozinho
-a imagem `~/.config/whatscli/whatscli-qr.png` — ou diminua a fonte do terminal (`Ctrl+-`)
+a imagem `~/.config/whatscli/accounts/default/whatscli-qr.png` — ou diminua a fonte do terminal (`Ctrl+-`)
 e amplie a janela para lê-lo direto na tela.
 
 ### Diagnóstico de conexão

@@ -12,7 +12,21 @@ description: Como funciona o pacote messages/ — conexão WhatsApp via whatsmeo
 | `messages.go` | Tipos (`Message`, `Chat`, `Contact`, `Command`), interface `UiMessageHandler`, sufixos JID |
 | `session_manager.go` | Conexão whatsmeow, login QR, eventos, `execCommand`, envio e download de mídia |
 | `storage.go` | `MessageDatabase` — storage em memória thread-safe |
+| `accounts.go` | `AccountManager`: um `SessionManager` por conta, roteamento de comandos, `/contas` e `/conta ...`, `UiAccountHandler` |
 | `bot.go` | Bot de auto-resposta via OpenAI (streaming), comandos `/ai`, `/end`, `/key` no chat |
+
+## Várias contas
+
+- `AccountManager` (`accounts.go`) lê `accounts.json`, cria um
+  `SessionManager{AccountID: id}` por conta e embrulha o handler de cada uma
+  num `accountHandler` que guarda o último status/QR da conta (para reenviar
+  quando ela vira ativa) e repassa o resto.
+- Trocar de conta (`SetActive`): avisa a UI (`SetActiveAccount`), publica a
+  lista (`SetAccounts`), manda `__resync` para a conta nova (republica chats,
+  stories, status e limpa o chat aberto) e reenvia o QR pendente.
+- Remover: `logout` + `Stop()` (espera o `runManager` sair) em goroutine, e só
+  então apaga `accounts/<id>/`. Não dá para remover a última conta; máximo de
+  `config.MaxAccounts` (5).
 
 ## SessionManager
 
@@ -21,7 +35,7 @@ description: Como funciona o pacote messages/ — conexão WhatsApp via whatsmeo
   - `ChatChannel` / `StatusChannel` — atualizações internas
   - `LoginChannel` — resultado da tentativa de conexão assíncrona
 - Conexão: `getConnection()` cria o `whatsmeow.Client` com device store
-  SQLite (`config.GetSessionFilePath()+".db"`). O login roda FORA da
+  SQLite da conta (`sm.sessionDBPath()` → `accounts/<id>/session.db`). O login roda FORA da
   goroutine do manager (`startLogin()` → `runLogin()` → `waitForQRCode()`),
   senão a espera do QR travaria o loop de comandos; só o manager escreve em
   `sm.client`, a goroutine devolve `loginResult` pelo `LoginChannel`.
@@ -30,7 +44,7 @@ description: Como funciona o pacote messages/ — conexão WhatsApp via whatsmeo
   o frontend desenha (mantendo a zona silenciosa, que o render antigo comia).
   O código de pareamento tem ~300 caracteres = matriz ~73x73, ou seja ~44
   linhas de terminal; quando não cabe, a UI manda `openqr` e o núcleo abre o
-  PNG (`qrPNGPath()`).
+  PNG (`sm.qrPNGPath()`, na pasta da conta `sm.AccountID`).
 - **Depurar conexão**: `ZAPTERM_DEBUG=1` (ou `=debug`) liga o log do whatsmeow
   no stderr (`messages/debuglog.go`) — stdout é do protocolo NDJSON. Foi assim
   que se viu o `Client outdated (405)`: quando o WhatsApp recusa a versão do

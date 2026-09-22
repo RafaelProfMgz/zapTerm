@@ -16,7 +16,11 @@ description: Como funciona o pacote config/ — arquivo INI do usuário, default
 
 - INI em `~/.config/whatscli/whatscli.config` (via xdg). Seções: `[general]`,
   `[keymap]`, `[ui]`, `[colors]`, `[bot]`.
-- Sessão WhatsApp: `~/.config/whatscli/session.db` (SQLite do whatsmeow).
+- Contas: registro em `~/.config/whatscli/accounts.json` (`config/accounts.go`);
+  cada conta tem sua pasta `accounts/<id>/` com `session.db` (SQLite do
+  whatsmeow), `cache.json` e o PNG do QR — helpers `GetSessionFilePathFor`,
+  `GetCacheFilePathFor`, `GetQRFilePathFor`. `InitAccounts()` migra os
+  arquivos da raiz (versões antigas) para `accounts/default/`.
 - O caminho real é exposto por `config.GetConfigFilePath()` (aparece no fim
   da ajuda F1).
 
