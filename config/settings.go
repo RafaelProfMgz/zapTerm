@@ -185,7 +185,7 @@ var Config = IniFile{
 	},
 	&Bot{
 		Enabled:             true,
-		ChatId:              "120363426087525156@g.us",
+		ChatId:              "",
 		TriggerPrefix:       "@",
 		Model:               "gpt-4o-mini",
 		SystemPrompt:        "You are a helpful WhatsApp assistant. Reply concisely in the same language as the message.",
