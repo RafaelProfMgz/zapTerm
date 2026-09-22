@@ -157,6 +157,30 @@ func isChatCommand(text, cmd string) bool {
 	return text == cmd || strings.HasPrefix(text, cmd+" ")
 }
 
+// botChatId returns the chat the bot answers in for this account, or "" when
+// the bot does not run here. chat_id may be qualified with an account id
+// ("trabalho:1203...@g.us") to pick the account; a plain JID runs on the first
+// account only, so two accounts in the same group never both reply.
+func (sm *SessionManager) botChatId(chatId string) string {
+	chatId = strings.TrimSpace(chatId)
+	if chatId == "" {
+		return ""
+	}
+	// account ids are slugs, so a ':' before any '@' can only be the prefix
+	// (device JIDs like "5511…:12@s.whatsapp.net" have it after digits, but
+	// chat ids are never device JIDs)
+	if i := strings.Index(chatId, ":"); i > 0 && !strings.Contains(chatId[:i], "@") {
+		if chatId[:i] != sm.AccountID {
+			return ""
+		}
+		return chatId[i+1:]
+	}
+	if sm.primaryAccount != nil && !sm.primaryAccount() {
+		return ""
+	}
+	return chatId
+}
+
 // maybeReplyWithBot decides what the AI bot should do with an incoming message:
 // handle a chat command (/key, /ai, /end), answer it (in "/ai" mode or when the
 // trigger prefix is present), or ignore it. Replies are streamed back, editing a
@@ -170,7 +194,7 @@ func (sm *SessionManager) maybeReplyWithBot(msg Message) {
 	if msg.FromMe || msg.Kind != MessageKindText || strings.TrimSpace(msg.Text) == "" {
 		return
 	}
-	if bot.ChatId == "" || msg.ChatId != bot.ChatId {
+	if msg.ChatId != sm.botChatId(bot.ChatId) {
 		return
 	}
 

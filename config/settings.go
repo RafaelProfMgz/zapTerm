@@ -101,7 +101,9 @@ type Bot struct {
 	// Enabled turns the auto-reply bot on or off.
 	Enabled bool
 	// ChatId is the only chat the bot will reply in (e.g. "5511999999999@s.whatsapp.net").
-	// For a group, use the group JID (ends with "@g.us").
+	// For a group, use the group JID (ends with "@g.us"). With several
+	// accounts, prefix the account id ("trabalho:1203...@g.us") to choose
+	// which one runs the bot; a plain JID runs on the first account only.
 	ChatId string
 	// TriggerPrefix, when non-empty, makes the bot reply ONLY to messages that
 	// start with this prefix (e.g. "@"). The prefix is stripped before the text

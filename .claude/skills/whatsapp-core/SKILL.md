@@ -97,7 +97,9 @@ description: Como funciona o pacote messages/ — conexão WhatsApp via whatsmeo
 - Opcional, config na seção `[bot]` (enabled, chat_id, trigger_prefix,
   model…). Chave padrão em `OPENAI_API_KEY` (carregada de `.env` via
   `config/dotenv.go`).
-- Responde apenas no `chat_id` configurado; streaming reescreve a própria
+- Responde apenas no `chat_id` configurado (`sm.botChatId`): `conta:jid`
+  escolhe a conta; JID puro roda só na primeira conta da lista (evita duas
+  contas no mesmo grupo respondendo em dobro); streaming reescreve a própria
   mensagem via `MessageDatabase.UpdateMessageText`.
 
 ## Como adicionar um comando novo

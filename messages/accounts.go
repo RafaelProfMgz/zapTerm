@@ -107,6 +107,10 @@ func (am *AccountManager) addManager(id string) *SessionManager {
 	sm.Init(h)
 	sm.background = func() bool { return am.Active() != id }
 	sm.notifyPrefix = func() string { return am.notifyPrefix(id) }
+	sm.primaryAccount = func() bool {
+		ids := am.ids()
+		return len(ids) > 0 && ids[0] == id
+	}
 	am.mu.Lock()
 	am.managers[id] = sm
 	am.handlers[id] = h

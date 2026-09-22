@@ -206,3 +206,22 @@ func TestAccountManagerNotifyPrefix(t *testing.T) {
 		t.Fatal("background flag should follow the active account")
 	}
 }
+
+func TestBotChatIdPerAccount(t *testing.T) {
+	am, _, _ := newTestAccounts(t)
+	def, work := am.session("default"), am.session("trabalho")
+	const grp = "120363@g.us"
+	if def.botChatId(grp) != grp || work.botChatId(grp) != "" {
+		t.Fatal("plain chat_id must run on the first account only")
+	}
+	if def.botChatId("trabalho:"+grp) != "" || work.botChatId("trabalho:"+grp) != grp {
+		t.Fatal("qualified chat_id must run on that account only")
+	}
+	if def.botChatId("") != "" {
+		t.Fatal("empty chat_id disables the bot")
+	}
+	alone := &SessionManager{AccountID: "default"}
+	if alone.botChatId(grp) != grp {
+		t.Fatal("a manager running alone keeps the old behaviour")
+	}
+}

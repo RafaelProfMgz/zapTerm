@@ -98,6 +98,9 @@ type SessionManager struct {
 	// the manager runs alone)
 	background   func() bool   // this account is not the one on screen
 	notifyPrefix func() string // "[Trabalho] " when more than one account is connected
+	// primaryAccount reports whether this is the first account of the list:
+	// the one an unqualified bot chat_id runs on
+	primaryAccount func() bool
 }
 
 func (sm *SessionManager) inBackground() bool {

@@ -127,7 +127,7 @@ Como ficou:
   conversa aberta de uma conta em segundo plano também notifica (não está na
   tela).
 
-## Fase 4 — acabamento
+## Fase 4 — acabamento — FEITA
 
 - Ajuda (`buildHelpText` no tview e o cartão ATALHOS no Ink) com os comandos
   `/conta*`.
@@ -137,6 +137,12 @@ Como ficou:
 - `config.Bot.ChatId` hoje é global: qualificar por conta (`conta:chatid`) ou
   documentar que o bot roda só na conta ativa.
 
+Como ficou: ajuda (tview `buildHelpText` e cartão ATALHOS do Ink) e limite de
+5 contas entraram na Fase 2/3; README ganhou a seção "Várias contas"; o bot
+aceita `chat_id = conta:jid` e, com JID puro, roda só na primeira conta da
+lista (`SessionManager.botChatId`) — assim duas contas no mesmo grupo nunca
+respondem em dobro.
+
 ## Decisões já tomadas
 
 - **Um SQLite por conta** (`accounts/<id>/session.db`) em vez de vários devices
@@ -144,5 +150,6 @@ Como ficou:
   contenção de escrita entre contas.
 - **Sem conta "global"**: a conta ativa decide o que o painel de mensagens e os
   comandos sem `account` fazem.
-- **tview fica em uma conta** até a Fase 4; o Ink é a interface padrão desde a
-  v2.0.0.
+- **tview mostra uma conta por vez**: todas rodam, a troca é por `/conta`
+  (sem barra lateral); a barra `[ CONTAS ]` é só do Ink, a interface padrão
+  desde a v2.0.0.
