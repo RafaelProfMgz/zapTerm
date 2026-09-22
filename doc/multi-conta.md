@@ -86,7 +86,7 @@ Como ficou (difere do rascunho acima em dois pontos):
   inativas — a troca zera o estado e o núcleo reenvia tudo (`__resync`).
 - O limite de 5 contas (`config.MaxAccounts`) já entrou aqui.
 
-## Fase 3 — barra lateral de contas no Ink
+## Fase 3 — barra lateral de contas no Ink — FEITA
 
 1. Estado por conta em `app.mjs`: trocar `chats`/`msgs`/`status`/`qr`/
    `currentChat` por `byAccount[id] = {...}` + `activeId`; a renderização lê
@@ -113,6 +113,19 @@ Como ficou (difere do rascunho acima em dois pontos):
    contas continuam recebendo mensagens enquanto o QR está aberto.
 5. Notificação de sistema e bell prefixam o label da conta quando há mais de
    uma conectada.
+
+Como ficou:
+
+- `src/accounts.mjs`: `useAccounts(bridge)` (estado `byAccount` + merge dos
+  eventos), `AccountRail` (20 colunas, para caber `[n] [SEM SESSÃO]`) e as
+  funções puras de clique/navegação (testadas em `units.test.mjs`).
+- Ao voltar para uma conta, o Ink pede de novo a conversa que estava aberta
+  nela (o `__resync` do núcleo limpa o chat aberto).
+- `+` / clique em "+ nova conta" preenchem `/conta nova ` no prompt (o nome é
+  digitado ali); o núcleo cria a conta, ativa e mostra o QR dela.
+- Bell não carrega texto, então só a notificação de sistema leva o prefixo. A
+  conversa aberta de uma conta em segundo plano também notifica (não está na
+  tela).
 
 ## Fase 4 — acabamento
 

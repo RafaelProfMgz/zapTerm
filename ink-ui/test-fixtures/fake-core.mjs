@@ -14,6 +14,10 @@ const accounts = [
 ];
 let active = 'default';
 const chatsOf = {
+  default: [
+    {id: '123@s.whatsapp.net', isGroup: false, name: 'Alice', unread: 2, lastMessage: 1000},
+    {id: 'grp@g.us', isGroup: true, name: 'Equipe', unread: 0, lastMessage: 900},
+  ],
   trabalho: [{id: '999@s.whatsapp.net', isGroup: false, name: 'Cliente', unread: 1, lastMessage: 3000}],
 };
 
@@ -21,14 +25,7 @@ emit({type: 'ready', version: 'vTEST'});
 emit({type: 'account', id: active});
 emit({type: 'accounts', active, accounts});
 emit({type: 'status', account: 'default', connected: true, lastSeen: ''});
-emit({
-  type: 'chats',
-  account: 'default',
-  chats: [
-    {id: '123@s.whatsapp.net', isGroup: false, name: 'Alice', unread: 2, lastMessage: 1000},
-    {id: 'grp@g.us', isGroup: true, name: 'Equipe', unread: 0, lastMessage: 900},
-  ],
-});
+emit({type: 'chats', account: 'default', chats: chatsOf.default});
 emit({
   type: 'stories',
   stories: [
@@ -60,6 +57,8 @@ rl.on('line', line => {
     emit({type: 'account', id: active});
     emit({type: 'accounts', active, accounts});
     emit({type: 'chats', account: active, chats: chatsOf[active] || []});
+    const acc = accounts.find(a => a.id === active);
+    emit({type: 'status', account: active, connected: acc.connected, loggedIn: acc.loggedIn, needsLogin: !!acc.needsLogin});
   }
   if (cmd.cmd === 'reconectar' || cmd.cmd === 'novoqr') {
     emit({type: 'status', connected: false, loggedIn: false, connecting: true, needsLogin: false});

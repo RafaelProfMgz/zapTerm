@@ -11,6 +11,7 @@ import LogsScreen from './logs.mjs';
 import SettingsScreen, {settingsActionAt, settingsActionForKey} from './settings.mjs';
 import QRScreen, {qrLayout} from './qr.mjs';
 import StoriesScreen from './stories.mjs';
+import {AccountRail, RAIL_WIDTH, railVisible, railItemAt, nextAccount, useAccounts} from './accounts.mjs';
 
 const h = React.createElement;
 
@@ -110,18 +111,10 @@ export default function App({mouse}) {
   const {stdout} = useStdout();
 
   const bridge = useMemo(() => createBridge(), []);
-  const [chats, setChats] = useState([]);
-  const [stories, setStories] = useState([]);
   const [storySel, setStorySel] = useState(0);
-  const [msgs, setMsgs] = useState([]);
   const [log, setLog] = useState([{kind: 'text', text: 'iniciando o núcleo Go…', stamp: nowStamp()}]);
-  const [status, setStatus] = useState({connected: false, lastSeen: '', loggedIn: false, connecting: false, needsLogin: false});
-  const [qr, setQr] = useState(null); // {matrix, png, message} do login por QR
   const [qrHidden, setQrHidden] = useState(false); // ESC esconde sem cancelar
   const [version, setVersion] = useState('');
-  const [accounts, setAccounts] = useState([]); // [{id, label, jid, connected…}]
-  const [activeId, setActiveId] = useState('');
-  const [currentChat, setCurrentChat] = useState(null);
   const [playingId, setPlayingId] = useState('');
   const [screen, setScreen] = useState('session');
   const [focus, setFocus] = useState('chats');
@@ -135,16 +128,33 @@ export default function App({mouse}) {
   const [finderScope, setFinderScope] = useState(0);
   const [finderSel, setFinderSel] = useState(0);
   const [finderKey, setFinderKey] = useState(0); // remonta o campo de busca p/ limpar
+  const [inputDefault, setInputDefault] = useState(''); // texto pré-preenchido do prompt
 
-  const currentChatRef = useRef(null);
-  currentChatRef.current = currentChat;
-  const connRef = useRef(false); // detecta transição de conexão p/ logar no feed
   const qrOpenedRef = useRef(false); // já abrimos a imagem deste pareamento?
-  // conta ativa: por enquanto a UI só mostra uma conta; eventos de outras são
-  // descartados e reenviados pelo núcleo quando a conta vira ativa
-  const activeIdRef = useRef('');
-  const accountsRef = useRef([]);
   const mouseRef = useRef(null); // handler de mouse — atribuído mais abaixo
+  const accountsRef = useRef([]);
+
+  const pushLog = (kind, text) =>
+    setLog(l => [...l.slice(-300), {kind, text, stamp: nowStamp()}]);
+  const labelOf = id => accountsRef.current.find(a => a.id === id)?.label || id;
+
+  // estado por conta (conversas, mensagens, status, QR) — a tela lê a ativa
+  const acc = useAccounts(bridge, {
+    // linhas de contas em segundo plano ganham o nome da conta
+    onLog: (kind, text, id) => pushLog(kind,
+      accountsRef.current.length > 1 && id && id !== acc.activeRef.current ? `[${labelOf(id)}] ${text}` : text),
+    onSwitch: id => {
+      setSelChat(0);
+      setSelMsg(null);
+      setQrHidden(false);
+      qrOpenedRef.current = false;
+      if (accountsRef.current.length > 1) pushLog('net', `[CONTA] ${labelOf(id)}`);
+    },
+  });
+  const {accounts, activeId} = acc;
+  accountsRef.current = accounts;
+  const {chats, stories, msgs, status, qr, currentChat} = acc.active;
+  const {setMsgs, setCurrentChat} = acc;
 
   useEffect(() => {
     if (!mouse) return;
@@ -153,82 +163,47 @@ export default function App({mouse}) {
     return () => mouse.off('mouse', fn);
   }, [mouse]);
 
+  // as contas em segundo plano também logam, prefixadas com o nome da conta
+  const logFrom = (kind, e, text) => {
+    const bg = accountsRef.current.length > 1 && e.account && e.account !== acc.activeRef.current;
+    pushLog(kind, bg ? `[${labelOf(e.account)}] ${text}` : text);
+  };
+  const logRef = useRef(logFrom);
+  logRef.current = logFrom;
+
   useEffect(() => {
-    const pushLog = (kind, text) =>
-      setLog(l => [...l.slice(-300), {kind, text, stamp: nowStamp()}]);
-    // evento sem "account" (núcleo antigo, eventos globais) vale sempre
-    const mine = e => !e.account || !activeIdRef.current || e.account === activeIdRef.current;
-    const on = (type, fn) => bridge.on(type, e => { if (mine(e)) fn(e); });
-    const labelOf = id => accountsRef.current.find(a => a.id === id)?.label || id;
     bridge.on('ready', e => setVersion(e.version || ''));
-    bridge.on('accounts', e => {
-      accountsRef.current = e.accounts || [];
-      setAccounts(accountsRef.current);
-    });
-    bridge.on('account', e => {
-      // troca de conta: zera o estado da anterior; chats/status/QR da nova
-      // chegam logo em seguida
-      activeIdRef.current = e.id || '';
-      setActiveId(activeIdRef.current);
-      setChats([]);
-      setStories([]);
-      setMsgs([]);
-      setSelMsg(null);
-      setSelChat(0);
-      setCurrentChat(null);
-      setQr(null);
-      setQrHidden(false);
-      qrOpenedRef.current = false;
-      if (accountsRef.current.length > 1) pushLog('net', `[CONTA] ${labelOf(e.id)}`);
-    });
-    on('chats', e => setChats(e.chats || []));
-    on('stories', e => {
-      const list = e.stories || [];
-      setStories(list);
-      setStorySel(s => Math.max(0, Math.min(s, Math.max(0, list.length - 1))));
-    });
-    on('screen', e => { setMsgs(e.messages || []); setSelMsg(null); });
-    on('message', e => {
-      if (e.message && currentChatRef.current && e.message.chatId === currentChatRef.current.id) {
-        setMsgs(m => [...m, e.message]);
-      }
-    });
-    on('status', e => {
-      const connected = !!e.connected;
-      if (connRef.current !== connected) {
-        connRef.current = connected;
-        pushLog('net', connected
-          ? '[TÚNEL_ESTABELECIDO] conexão estável.'
-          : '[TÚNEL_PERDIDO] aguardando reconexão…');
-      }
-      setStatus({
-        connected,
-        lastSeen: e.lastSeen || '',
-        loggedIn: !!e.loggedIn,
-        connecting: !!e.connecting,
-        needsLogin: !!e.needsLogin,
-      });
-    });
-    on('qr', e => {
-      if (e.event === 'code') {
-        setQr({matrix: e.matrix || [], png: e.png || '', message: e.message || ''});
-      } else {
-        // success/done: some o QR e volta à sessão
-        setQr(null);
+    // a tela QR some quando o pareamento da conta ativa termina
+    bridge.on('qr', e => {
+      if (e.event !== 'code' && (!e.account || e.account === acc.activeRef.current)) {
         setQrHidden(false);
         qrOpenedRef.current = false;
       }
-      if (e.message) pushLog('net', e.message);
     });
+    bridge.on('screen', e => { if (!e.account || e.account === acc.activeRef.current) setSelMsg(null); });
     bridge.on('playing', e => setPlayingId(e.msgId || ''));
-    on('text', e => pushLog('text', e.text));
-    // erro de conta em segundo plano ainda aparece, com o nome da conta
-    bridge.on('error', e => pushLog('error', mine(e) ? e.text : `[${labelOf(e.account)}] ${e.text}`));
-    on('file', e => pushLog('text', `arquivo salvo: ${e.path}`));
+    bridge.on('text', e => logRef.current('text', e, e.text));
+    bridge.on('error', e => logRef.current('error', e, e.text));
+    bridge.on('file', e => logRef.current('text', e, `arquivo salvo: ${e.path}`));
     bridge.on('exit', () => exit());
     bridge.start(); // listeners prontos: descarrega eventos chegados cedo
     return () => bridge.quit();
   }, [bridge, exit]);
+
+  // a lista de stories encolhe: a seleção não pode apontar para além do fim
+  useEffect(() => {
+    setStorySel(s => Math.max(0, Math.min(s, Math.max(0, stories.length - 1))));
+  }, [stories]);
+
+  const switchAccount = id => {
+    if (id && id !== activeId) bridge.send('conta', [id]);
+  };
+  // "+ nova conta": o prompt já vem com o comando, só falta o nome
+  const promptNewAccount = () => {
+    setInputDefault('/conta nova ');
+    setInputKey(k => k + 1);
+    setFocus('input');
+  };
 
   const visibleChats = useMemo(() => filterChats(chats, filter), [chats, filter]);
 
@@ -252,6 +227,7 @@ export default function App({mouse}) {
 
   const rows = stdout?.rows || 30;
   const cols = stdout?.columns || 80;
+  const railW = railVisible(accounts, cols) ? RAIL_WIDTH : 0;
   const innerHeight = rows - 4; // cabeçalho (2) + taskbar (2)
   const sessionHeight = innerHeight - 4; // prompt (3) + linha de dicas (1)
 
@@ -301,6 +277,17 @@ export default function App({mouse}) {
   useInput((input, key) => {
     if (key.ctrl && input === 'q') { bridge.quit(); exit(); return; }
     if (key.ctrl && input === 'r') { runAction('reconectar'); return; }
+    // contas, de qualquer tela (inclusive com o QR aberto): Alt+1..9 direto,
+    // Ctrl+↑/↓ anda na lista
+    if (key.meta && input >= '1' && input <= '9') {
+      const target = accounts[Number(input) - 1];
+      if (target) switchAccount(target.id);
+      return;
+    }
+    if (key.ctrl && (key.upArrow || key.downArrow)) {
+      switchAccount(nextAccount(accounts, activeId, key.upArrow ? -1 : 1));
+      return;
+    }
     if (qrVisible) {
       // a tela de QR cobre as demais: só as ações de pareamento respondem
       if (key.escape) { setQrHidden(true); return; }
@@ -355,6 +342,7 @@ export default function App({mouse}) {
       else if (key.return) { openChat(visibleChats[selChat]); setFocus('input'); }
       else if (input >= '1' && input <= '4') { setFilter(Number(input) - 1); setSelChat(0); }
       else if (input === 'f') { setFilter(f => (f + 1) % FILTERS.length); setSelChat(0); }
+      else if (input === '+') promptNewAccount();
     } else if (focus === 'messages') {
       if (key.upArrow) setSelMsg(s => Math.max(0, (s == null ? msgs.length : s) - 1));
       else if (key.downArrow) setSelMsg(s => (s == null ? null : Math.min(msgs.length - 1, s + 1)));
@@ -368,6 +356,7 @@ export default function App({mouse}) {
 
   const onSubmit = value => {
     const text = value.trim();
+    setInputDefault('');
     setInputKey(k => k + 1); // limpa o campo
     if (!text) return;
     if (text.startsWith('/')) {
@@ -417,6 +406,15 @@ export default function App({mouse}) {
     }
     const bodyTop = 3; // linha 1 = cabeçalho, linha 2 = borda
     const bodyBottom = 2 + sessionHeight;
+    if (y >= bodyTop && y <= bodyBottom && railW > 0 && x <= railW) {
+      // trilho de contas: clique troca de conta ou abre "+ nova conta"
+      if (type !== 'click') return;
+      const item = railItemAt(y - bodyTop, accounts.length);
+      if (item?.kind === 'account') switchAccount(accounts[item.index].id);
+      else if (item?.kind === 'add' && accounts.length < 5) promptNewAccount();
+      return;
+    }
+    x -= railW; // daqui em diante as colunas são relativas à lista de conversas
     if (y >= bodyTop && y <= bodyBottom) {
       if (x <= SIDEBAR_WIDTH) {
         if (type === 'wheel') {
@@ -457,7 +455,8 @@ export default function App({mouse}) {
 
   let body;
   if (qrVisible) {
-    body = h(QRScreen, {qr, height: innerHeight, width: cols});
+    const label = accounts.length > 1 ? (accounts.find(a => a.id === activeId)?.label || activeId) : '';
+    body = h(QRScreen, {qr, height: innerHeight, width: cols, accountLabel: label});
   } else if (screen === 'stories') {
     body = h(StoriesScreen, {
       stories,
@@ -471,7 +470,7 @@ export default function App({mouse}) {
   } else if (screen === 'logs') {
     body = h(LogsScreen, {log, status, scroll: logScroll, height: innerHeight});
   } else if (screen === 'settings') {
-    body = h(SettingsScreen, {version, status, binPath: bridge.bin, height: innerHeight});
+    body = h(SettingsScreen, {version, status, binPath: bridge.bin, height: innerHeight, accountId: activeId});
   } else {
     body = h(Box, {flexDirection: 'column', height: innerHeight},
       h(Box, {flexGrow: 1},
@@ -487,6 +486,9 @@ export default function App({mouse}) {
             onSubmit: openFinderSelection,
           })
           : h(React.Fragment, null,
+            railW > 0
+              ? h(AccountRail, {accounts, activeId, byAccount: acc.byAccount, height: sessionHeight})
+              : null,
             h(ChatList, {
               chats: visibleChats,
               filter,
@@ -516,6 +518,7 @@ export default function App({mouse}) {
         h(Text, {color: theme.primary, bold: true}, 'você@zapterm:~$ '),
         h(TextInput, {
           key: inputKey,
+          defaultValue: inputDefault,
           isDisabled: focus !== 'input' || finderOpen,
           placeholder: 'digite_mensagem_ou_comando…',
           onSubmit,
@@ -523,7 +526,7 @@ export default function App({mouse}) {
       ),
       h(Box, {paddingX: 1},
         h(Text, {color: theme.textDim, dimColor: true, wrap: 'truncate'},
-          '[TAB] painel · [↑/↓] navegar · [ENTER] abrir/enviar · [CTRL+F] buscar · [CTRL+R] reconectar · [1-4] filtros · [P] áudio · [O] abrir · [D] baixar · [B] histórico'),
+          '[TAB] painel · [↑/↓] navegar · [ENTER] abrir/enviar · [CTRL+F] buscar · [CTRL+R] reconectar · [ALT+1-9] conta · [+] nova conta · [1-4] filtros · [P] áudio · [O] abrir · [D] baixar · [B] histórico'),
       ),
     );
   }

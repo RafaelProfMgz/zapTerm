@@ -190,3 +190,19 @@ func TestAccountLines(t *testing.T) {
 }
 
 func sleepTick() { time.Sleep(20 * time.Millisecond) }
+
+func TestAccountManagerNotifyPrefix(t *testing.T) {
+	am, _, _ := newTestAccounts(t)
+	sm := am.session("trabalho")
+	am.recordStatus("default", SessionStatus{Connected: true})
+	if got := sm.notifyTitle("Ana"); got != "Ana" {
+		t.Fatalf("one connected account must not prefix: %q", got)
+	}
+	am.recordStatus("trabalho", SessionStatus{Connected: true})
+	if got := sm.notifyTitle("Ana"); got != "[Trabalho] Ana" {
+		t.Fatalf("title = %q", got)
+	}
+	if !sm.inBackground() || am.session("default").inBackground() {
+		t.Fatal("background flag should follow the active account")
+	}
+}

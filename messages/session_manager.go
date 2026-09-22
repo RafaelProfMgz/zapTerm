@@ -94,6 +94,22 @@ type SessionManager struct {
 	qrCancel        context.CancelFunc
 	pendingLogin    *bool         // login requested while another one was unwinding
 	done            chan struct{} // closed when runManager returns
+	// set by AccountManager when several accounts run side by side (nil when
+	// the manager runs alone)
+	background   func() bool   // this account is not the one on screen
+	notifyPrefix func() string // "[Trabalho] " when more than one account is connected
+}
+
+func (sm *SessionManager) inBackground() bool {
+	return sm.background != nil && sm.background()
+}
+
+// notifyTitle is the desktop notification title for a message from contact.
+func (sm *SessionManager) notifyTitle(contact string) string {
+	if sm.notifyPrefix == nil {
+		return contact
+	}
+	return sm.notifyPrefix() + contact
 }
 
 // loginResult is what the async login goroutine reports back to the manager
@@ -1331,14 +1347,18 @@ func (eh *eventHandler) handleLiveMessage(evt *events.Message) {
 	if isNew {
 		eh.sm.maybeReplyWithBot(msg)
 	}
-	if msg.ChatId == eh.sm.currentReceiver {
+	isCurrent := msg.ChatId == eh.sm.currentReceiver
+	if isCurrent {
 		if isNew {
 			eh.sm.uiHandler.NewMessage(msg)
 		} else {
 			eh.sm.uiHandler.NewScreen(eh.sm.getMessages(msg.ChatId))
 		}
-	} else if markUnread && msg.Timestamp > uint64(time.Now().Unix()-30) {
-		if err := notify(msg.ContactShort, msg.Text); err != nil {
+	}
+	// the open chat of an account in the background is not on screen, so it
+	// still notifies
+	if markUnread && msg.Timestamp > uint64(time.Now().Unix()-30) && (!isCurrent || eh.sm.inBackground()) {
+		if err := notify(eh.sm.notifyTitle(msg.ContactShort), msg.Text); err != nil {
 			eh.sm.uiHandler.PrintError(err)
 		}
 	}

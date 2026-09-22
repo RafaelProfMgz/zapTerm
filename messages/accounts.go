@@ -105,6 +105,8 @@ func (am *AccountManager) addManager(id string) *SessionManager {
 	h := &accountHandler{UiMessageHandler: am.ui.ForAccount(id), am: am, id: id}
 	sm := &SessionManager{AccountID: id}
 	sm.Init(h)
+	sm.background = func() bool { return am.Active() != id }
+	sm.notifyPrefix = func() string { return am.notifyPrefix(id) }
 	am.mu.Lock()
 	am.managers[id] = sm
 	am.handlers[id] = h
@@ -199,6 +201,28 @@ func (am *AccountManager) Accounts() []AccountInfo {
 		list = append(list, info)
 	}
 	return list
+}
+
+// notifyPrefix labels desktop notifications with the account ("[Trabalho] ")
+// once more than one account is connected; with a single one it stays empty.
+func (am *AccountManager) notifyPrefix(id string) string {
+	am.mu.RLock()
+	connected := 0
+	for _, st := range am.status {
+		if st.Connected {
+			connected++
+		}
+	}
+	am.mu.RUnlock()
+	if connected < 2 {
+		return ""
+	}
+	for _, acc := range am.Accounts() {
+		if acc.ID == id {
+			return "[" + acc.Label + "] "
+		}
+	}
+	return ""
 }
 
 func (am *AccountManager) publishAccounts() {
