@@ -20,7 +20,7 @@ import (
 	"github.com/zyedidia/clipboard"
 )
 
-var VERSION string = "v2.1.1"
+var VERSION string = "v2.2.0"
 
 var sndTxt string = ""
 var currentReceiver messages.Chat = messages.Chat{}
@@ -50,7 +50,9 @@ var focusOrder []tview.Primitive
 var prevFocus tview.Primitive
 var helpVisible bool
 
-var sessionManager *messages.SessionManager
+// accountManager runs one session per account (accounts.json). The tview UI
+// shows only the active account; commands without an account go to it.
+var accountManager *messages.AccountManager
 
 var keyBindings *cbind.Configuration
 
@@ -58,6 +60,11 @@ var uiHandler messages.UiMessageHandler
 
 func main() {
 	config.InitConfig()
+	// also migrates the pre-multi-account session into accounts/default/
+	if _, err := config.InitAccounts(); err != nil {
+		fmt.Fprintln(os.Stderr, "contas:", err)
+		os.Exit(1)
+	}
 	// headless mode for the Ink frontend (ink-ui/): no tview, NDJSON on stdio
 	for _, arg := range os.Args[1:] {
 		if arg == "--ui=json" {
@@ -70,8 +77,11 @@ func main() {
 	// using xclip/xsel/wl-clipboard (or a safe in-memory fallback).
 	clipboard.Initialize()
 	uiHandler = UiHandler{}
-	sessionManager = &messages.SessionManager{}
-	sessionManager.Init(uiHandler)
+	var err error
+	if accountManager, err = messages.NewAccountManager(tviewAccounts{}); err != nil {
+		fmt.Fprintln(os.Stderr, "contas:", err)
+		os.Exit(1)
+	}
 
 	app = tview.NewApplication()
 
@@ -127,10 +137,10 @@ func main() {
 			switch msg.Kind {
 			case messages.MessageKindAudio:
 				// clicking a voice message plays it right in the terminal
-				sessionManager.CommandChannel <- messages.Command{"play", []string{msg.Id}}
+				accountManager.Send("", messages.Command{"play", []string{msg.Id}})
 			case messages.MessageKindImage, messages.MessageKindVideo,
 				messages.MessageKindDocument:
-				sessionManager.CommandChannel <- messages.Command{"open", []string{msg.Id}}
+				accountManager.Send("", messages.Command{"open", []string{msg.Id}})
 			}
 			return
 		}
@@ -241,7 +251,7 @@ func main() {
 		return false
 	})
 	app.SetFocus(textInput)
-	if err := sessionManager.StartManager(); err != nil {
+	if err := accountManager.StartAll(); err != nil {
 		PrintError(err)
 	}
 	LoadShortcuts()
@@ -596,7 +606,7 @@ func handleSwitchPanelsBack(ev *tcell.EventKey) *tcell.EventKey {
 
 func handleCommand(command string) func(ev *tcell.EventKey) *tcell.EventKey {
 	return func(ev *tcell.EventKey) *tcell.EventKey {
-		sessionManager.CommandChannel <- messages.Command{command, nil}
+		accountManager.Send("", messages.Command{command, nil})
 		return nil
 	}
 }
@@ -660,7 +670,7 @@ func safeReadClipboard() (clip string, err error) {
 
 func handleQuit(ev *tcell.EventKey) *tcell.EventKey {
 	stopAudio()
-	sessionManager.CommandChannel <- messages.Command{"disconnect", nil}
+	accountManager.Shutdown()
 	app.Stop()
 	return nil
 }
@@ -681,7 +691,7 @@ func handleMessageCommand(command string) func(ev *tcell.EventKey) *tcell.EventK
 	return func(ev *tcell.EventKey) *tcell.EventKey {
 		hls := textView.GetHighlights()
 		if len(hls) > 0 {
-			sessionManager.CommandChannel <- messages.Command{command, []string{hls[0]}}
+			accountManager.Send("", messages.Command{command, []string{hls[0]}})
 			ResetMsgSelection()
 			app.SetFocus(textInput)
 		}
@@ -725,7 +735,7 @@ func handleChatPanelDown(ev *tcell.EventKey) *tcell.EventKey {
 // message commands it keeps the highlight, so pressing the key again stops it.
 func handlePlayMessage(ev *tcell.EventKey) *tcell.EventKey {
 	if hls := textView.GetHighlights(); len(hls) > 0 {
-		sessionManager.CommandChannel <- messages.Command{"play", []string{hls[0]}}
+		accountManager.Send("", messages.Command{"play", []string{hls[0]}})
 	}
 	return nil
 }
@@ -940,6 +950,13 @@ func buildHelpText() string {
 	row(cmdPrefix+"logout", "remover o login deste computador")
 	row(cmdPrefix+"reset", "limpar a sessão e reconectar do zero")
 
+	sec("Contas")
+	row(cmdPrefix+"contas", "listar as contas conectadas (* = ativa)")
+	row(cmdPrefix+"conta <id|n>", "trocar a conta ativa")
+	row(cmdPrefix+"conta nova <nome>", "adicionar uma conta e ler o QR code dela")
+	row(cmdPrefix+"conta renomear <id|n> <nome>", "renomear uma conta")
+	row(cmdPrefix+"conta remover <id|n>", "desconectar e apagar uma conta")
+
 	sec("Grupos")
 	row(cmdPrefix+"create <ids> Assunto", "criar grupo com os usuários")
 	row(cmdPrefix+"subject <texto>", "mudar o assunto do grupo")
@@ -981,7 +998,7 @@ func EnterCommand(key tcell.Key) {
 	}
 	if sndTxt == cmdPrefix+"quit" {
 		stopAudio()
-		sessionManager.CommandChannel <- messages.Command{"disconnect", nil}
+		accountManager.Shutdown()
 		app.Stop()
 		return
 	}
@@ -998,7 +1015,7 @@ func EnterCommand(key tcell.Key) {
 			cmd = cmdParts[0]
 			params = cmdParts[1:]
 		}
-		sessionManager.CommandChannel <- messages.Command{cmd, params}
+		accountManager.Send("", messages.Command{cmd, params})
 		textInput.SetText("")
 		return
 	}
@@ -1012,7 +1029,7 @@ func EnterCommand(key tcell.Key) {
 		Name:   "send",
 		Params: []string{currentReceiver.Id, sndTxt},
 	}
-	sessionManager.CommandChannel <- msg
+	accountManager.Send("", msg)
 	textInput.SetText("")
 }
 
@@ -1157,7 +1174,7 @@ func maybeAutoShowImage(msg messages.Message) {
 		return
 	}
 	select {
-	case sessionManager.CommandChannel <- messages.Command{"show", []string{msg.Id}}:
+	case accountManager.ActiveSession().CommandChannel <- messages.Command{"show", []string{msg.Id}}:
 	default: // channel full — the user can still press 's' or click the message
 	}
 }
@@ -1188,7 +1205,7 @@ func SetDisplayedChat(wid messages.Chat) {
 		textView.SetTitle(" [ MENSAGENS ] ")
 	}
 	refreshChatMarkers()
-	sessionManager.CommandChannel <- messages.Command{"select", []string{currentReceiver.Id}}
+	accountManager.Send("", messages.Command{"select", []string{currentReceiver.Id}})
 }
 
 // dateSeparator renders a dim day marker between messages, terminal-mock style.

@@ -24,7 +24,7 @@ O `SessionManager` já guarda tudo o que precisa em campos próprios (db, client
 canais, estado do bot), então **várias instâncias convivem** assim que os
 caminhos de arquivo e o roteamento de eventos deixarem de ser globais.
 
-## Fase 1 — caminhos por conta + registro (sem mudança visível)
+## Fase 1 — caminhos por conta + registro (sem mudança visível) — FEITA
 
 1. `config/accounts.go`: registro em `~/.config/whatscli/accounts.json`
    ```json
@@ -44,7 +44,7 @@ caminhos de arquivo e o roteamento de eventos deixarem de ser globais.
 Teste: subir o binário com um `XDG_CONFIG_HOME` contendo a estrutura antiga e
 conferir que a sessão foi migrada e continua conectando.
 
-## Fase 2 — `AccountManager` + campo `account` no protocolo
+## Fase 2 — `AccountManager` + campo `account` no protocolo — FEITA
 
 1. `messages/accounts.go`:
    ```go
@@ -74,7 +74,19 @@ conferir que a sessão foi migrada e continua conectando.
 Teste: `fake-core.mjs` ganha duas contas e o teste do bridge confere que um
 `select` com `account` só mexe naquela conta.
 
-## Fase 3 — barra lateral de contas no Ink
+Como ficou (difere do rascunho acima em dois pontos):
+
+- Em vez de uma interface com todos os métodos duplicados com `accountID`, o
+  `UiAccountHandler` tem `ForAccount(id) UiMessageHandler`: o JSON devolve um
+  handler filho que carimba `"account"`; o tview devolve um filtro que só
+  repassa a conta ativa (`accounts_ui.go`). O decorador `accountHandler`
+  guarda status/QR por conta para reenviar na troca.
+- O tview também passou a usar o `AccountManager` (troca por `/conta`, sem
+  barra lateral), e o Ink, até a Fase 3, descarta eventos das contas
+  inativas — a troca zera o estado e o núcleo reenvia tudo (`__resync`).
+- O limite de 5 contas (`config.MaxAccounts`) já entrou aqui.
+
+## Fase 3 — barra lateral de contas no Ink — FEITA
 
 1. Estado por conta em `app.mjs`: trocar `chats`/`msgs`/`status`/`qr`/
    `currentChat` por `byAccount[id] = {...}` + `activeId`; a renderização lê
@@ -102,7 +114,20 @@ Teste: `fake-core.mjs` ganha duas contas e o teste do bridge confere que um
 5. Notificação de sistema e bell prefixam o label da conta quando há mais de
    uma conectada.
 
-## Fase 4 — acabamento
+Como ficou:
+
+- `src/accounts.mjs`: `useAccounts(bridge)` (estado `byAccount` + merge dos
+  eventos), `AccountRail` (20 colunas, para caber `[n] [SEM SESSÃO]`) e as
+  funções puras de clique/navegação (testadas em `units.test.mjs`).
+- Ao voltar para uma conta, o Ink pede de novo a conversa que estava aberta
+  nela (o `__resync` do núcleo limpa o chat aberto).
+- `+` / clique em "+ nova conta" preenchem `/conta nova ` no prompt (o nome é
+  digitado ali); o núcleo cria a conta, ativa e mostra o QR dela.
+- Bell não carrega texto, então só a notificação de sistema leva o prefixo. A
+  conversa aberta de uma conta em segundo plano também notifica (não está na
+  tela).
+
+## Fase 4 — acabamento — FEITA
 
 - Ajuda (`buildHelpText` no tview e o cartão ATALHOS no Ink) com os comandos
   `/conta*`.
@@ -112,6 +137,12 @@ Teste: `fake-core.mjs` ganha duas contas e o teste do bridge confere que um
 - `config.Bot.ChatId` hoje é global: qualificar por conta (`conta:chatid`) ou
   documentar que o bot roda só na conta ativa.
 
+Como ficou: ajuda (tview `buildHelpText` e cartão ATALHOS do Ink) e limite de
+5 contas entraram na Fase 2/3; README ganhou a seção "Várias contas"; o bot
+aceita `chat_id = conta:jid` e, com JID puro, roda só na primeira conta da
+lista (`SessionManager.botChatId`) — assim duas contas no mesmo grupo nunca
+respondem em dobro.
+
 ## Decisões já tomadas
 
 - **Um SQLite por conta** (`accounts/<id>/session.db`) em vez de vários devices
@@ -119,5 +150,6 @@ Teste: `fake-core.mjs` ganha duas contas e o teste do bridge confere que um
   contenção de escrita entre contas.
 - **Sem conta "global"**: a conta ativa decide o que o painel de mensagens e os
   comandos sem `account` fazem.
-- **tview fica em uma conta** até a Fase 4; o Ink é a interface padrão desde a
-  v2.0.0.
+- **tview mostra uma conta por vez**: todas rodam, a troca é por `/conta`
+  (sem barra lateral); a barra `[ CONTAS ]` é só do Ink, a interface padrão
+  desde a v2.0.0.

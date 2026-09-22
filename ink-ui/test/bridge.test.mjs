@@ -97,3 +97,47 @@ test('bridge: eventos chegados antes do start() são bufferizados', async () => 
   bridge.quit();
   await exitP;
 });
+
+test('bridge: comando com account só mexe naquela conta', async () => {
+  const bridge = createBridge();
+  bridge.start();
+  const accounts = await waitFor(bridge, 'accounts');
+  assert.equal(accounts.active, 'default');
+  assert.deepEqual(accounts.accounts.map(a => a.id), ['default', 'trabalho']);
+
+  const screens = [];
+  bridge.on('screen', e => screens.push(e));
+  const echoP = waitFor(bridge, 'text');
+  bridge.send('select', ['999@s.whatsapp.net'], 'trabalho');
+  const echo = await echoP;
+  assert.equal(echo.account, 'trabalho');
+  assert.equal(screens.length, 1);
+  assert.equal(screens[0].account, 'trabalho', 'a tela veio da conta pedida');
+
+  // sem account: vai para a conta ativa
+  const activeP = waitFor(bridge, 'screen');
+  bridge.send('select', ['123@s.whatsapp.net']);
+  assert.equal((await activeP).account, 'default');
+
+  const exitP = waitFor(bridge, 'exit');
+  bridge.quit();
+  await exitP;
+});
+
+test('bridge: /conta troca a conta ativa e reenvia os chats', async () => {
+  const bridge = createBridge();
+  bridge.start();
+  await waitFor(bridge, 'ready');
+
+  // o núcleo anuncia a conta ativa na subida; aqui interessa só a troca
+  const switchP = new Promise(resolve => bridge.on('account', e => { if (e.id === 'trabalho') resolve(e); }));
+  const chatsP = new Promise(resolve => bridge.on('chats', e => { if (e.account === 'trabalho') resolve(e); }));
+  bridge.send('conta', ['trabalho']);
+  assert.equal((await switchP).id, 'trabalho');
+  const chats = await chatsP;
+  assert.equal(chats.chats[0].name, 'Cliente');
+
+  const exitP = waitFor(bridge, 'exit');
+  bridge.quit();
+  await exitP;
+});

@@ -146,7 +146,7 @@ A ajuda completa, comandos e atalhos estão dentro do app: digite `/help` (ou te
 ### Login
 
 Ao iniciar, o ZapTerm tenta conectar e mostra um **QR Code** desenhado no terminal
-(também salvo como imagem em `~/.config/whatscli/whatscli-qr.png`). Escaneie com o
+(também salvo como imagem em `~/.config/whatscli/accounts/default/whatscli-qr.png`). Escaneie com o
 WhatsApp do celular em *Aparelhos conectados > Conectar aparelho*. Se o QR não couber na
 tela, diminua a fonte do terminal ou aumente a janela. Depois da primeira vez, ele
 reconecta sozinho.
@@ -172,8 +172,42 @@ esconde sem cancelar.
 
 O código de pareamento do WhatsApp é grande (matriz de ~73x73 módulos), então desenhá-lo
 no terminal exige uma janela de **~44 linhas**. Em janelas menores o ZapTerm abre sozinho
-a imagem `~/.config/whatscli/whatscli-qr.png` — ou diminua a fonte do terminal (`Ctrl+-`)
+a imagem `~/.config/whatscli/accounts/default/whatscli-qr.png` — ou diminua a fonte do terminal (`Ctrl+-`)
 e amplie a janela para lê-lo direto na tela.
+
+### Várias contas
+
+O ZapTerm conecta até **5 contas do WhatsApp ao mesmo tempo**. Cada uma tem a
+sua sessão e o seu QR, e todas continuam recebendo mensagens enquanto você
+conversa em outra.
+
+| Como | O quê |
+| --- | --- |
+| `/conta nova <nome>` | adicionar uma conta — o QR dela aparece em seguida |
+| `/contas` | listar as contas (`*` = ativa) com número e estado |
+| `/conta <n>` ou `/conta <id>` | trocar a conta ativa |
+| `/conta renomear <n> <nome>` | renomear uma conta |
+| `/conta remover <n>` | desconectar no celular e apagar a conta deste computador |
+| `Alt+1`…`Alt+9` · `Ctrl+↑/↓` | trocar de conta (interface padrão) |
+| `+` ou clique em `+ nova conta` | adicionar uma conta (interface padrão) |
+
+Na interface padrão, a barra `[ CONTAS ]` à esquerda mostra cada conta com as
+não lidas somadas (`[3]`) e o estado (`[ONLINE]`, `[CONECTANDO]`, `[SEM SESSÃO]`);
+clique numa conta para trocar. Os comandos sem conta (como `/novoqr` e
+`/reconectar`) agem na conta ativa. A notificação de sistema mostra o nome da
+conta quando há mais de uma conectada.
+
+Cada conta fica em `~/.config/whatscli/accounts/<id>/` (sessão, cache e imagem
+do QR); a lista está em `~/.config/whatscli/accounts.json`. Quem já usava o
+ZapTerm antes tem a sessão movida para `accounts/default/` automaticamente —
+não precisa ler o QR de novo.
+
+Cada conta mantém as suas conversas em memória, então muitas contas com
+bastante histórico usam mais RAM.
+
+Bot de IA com várias contas: o `chat_id` da seção `[bot]` roda só na
+**primeira conta** da lista. Para escolher outra, prefixe o id da conta:
+`chat_id = trabalho:120363...@g.us`.
 
 ### Diagnóstico de conexão
 

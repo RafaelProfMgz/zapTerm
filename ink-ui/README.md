@@ -24,6 +24,13 @@ app só desenha a interface e devolve comandos.
 - Lado Go: `jsonui.go` (handler `UiMessageHandler` headless) — flag `--ui=json`.
 - Lado Node: `src/bridge.mjs` sobe o binário e troca NDJSON; `src/app.mjs`
   monta a interface.
+- Várias contas: todo evento de sessão leva `"account":"<id>"`; comandos
+  aceitam `{"cmd":"...","account":"<id>","params":[...]}` e, sem `account`,
+  vão para a conta ativa (`bridge.send(cmd, params, account)`). Eventos de
+  conta: `accounts` (`{active, accounts:[{id,label,jid,connected,…}]}`) e
+  `account` (`{id}`, troca de conta ativa — a UI zera o estado e o núcleo
+  reenvia chats/status/QR da nova). Por enquanto a UI mostra só a conta ativa
+  (eventos das outras são descartados, exceto erros).
 
 ## Como rodar
 
@@ -61,6 +68,9 @@ Cinco telas, seguindo os mockups de `design/`:
 | `1-4` / `f` | filtros: Todas · Não lidas · Grupos · Contatos |
 | `p` / `o` / `d` | tocar áudio · abrir anexo · baixar (mensagem selecionada) |
 | `b` | carregar histórico (backlog) |
+| `Alt+1-9` | trocar de conta (funciona em qualquer tela, inclusive com o QR aberto) |
+| `Ctrl+↑/↓` | conta anterior / próxima |
+| `+` | nova conta (com a lista de conversas em foco: preenche `/conta nova ` no prompt) |
 | `/comando` | qualquer comando do núcleo Go (`/connect`, `/read`, `/sendaudio`…) |
 | `Ctrl+Q` | sair |
 
@@ -73,6 +83,8 @@ ao Ink):
 | Ação | O quê |
 | --- | --- |
 | clique nas abas (cabeçalho ou taskbar `[F1]…[F5]`) | troca de tela |
+| clique numa conta (trilho `[ CONTAS ]`) | troca para aquela conta |
+| clique em `+ nova conta` | preenche `/conta nova ` no prompt |
 | clique numa conversa | abre a conversa e foca a digitação |
 | clique nas abas de filtro | aplica o filtro (Todas · Não lidas · Grupos · Contatos) |
 | clique no painel de mensagens / no prompt | move o foco |
@@ -82,6 +94,29 @@ ao Ink):
 
 Para selecionar texto com o mouse no terminal, segure `Shift` ao arrastar
 (padrão dos terminais quando o rastreio de mouse está ativo).
+
+## Várias contas
+
+Com mais de uma conta (`/conta nova <nome>`), um trilho `[ CONTAS ]` aparece
+à esquerda da lista de conversas (com uma conta só, ele aparece em janelas de
+110+ colunas, como atalho para `+ nova conta`):
+
+```
+[ CONTAS ]
+* 1 Pessoal
+  [ONLINE]
+  2 Trabalho
+  [3] [ONLINE]
++ nova conta
+```
+
+`*` = conta ativa, `[n]` = não lidas somadas. O estado de cada conta
+(conversas, mensagens, status, QR) fica em `byAccount[id]`
+(`useAccounts` em `src/accounts.mjs`); a tela lê a conta ativa, e as outras
+seguem recebendo mensagens — inclusive enquanto o QR de uma conta nova está
+aberto. A tela de QR diz de qual conta é o código, linhas de log de contas em
+segundo plano vêm prefixadas com `[Nome]`, e a notificação de sistema ganha o
+prefixo quando há mais de uma conta conectada.
 
 ## Lista de conversas
 
@@ -99,7 +134,7 @@ posts do autor selecionado à direita. `↑/↓` ou rolagem navegam os contatos.
 ## Cache local
 
 As conversas e os últimos ~100 recados de cada chat ficam num JSON leve em
-`~/.config/whatscli/cache.json` (gravação com *debounce* de 2s + flush ao sair).
+`~/.config/whatscli/accounts/<conta>/cache.json` (gravação com *debounce* de 2s + flush ao sair).
 Assim a lista de conversas e os stories já aparecem na abertura, antes mesmo de
 o WhatsApp sincronizar. O cache não guarda o proto bruto das mensagens (download
 de mídia só funciona online). Lado Go: `messages/cache.go`.

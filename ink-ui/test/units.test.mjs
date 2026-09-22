@@ -8,6 +8,7 @@ import {fuzzyMatch, searchChats, rawJid} from '../src/finder.mjs';
 import {kindLabel, storyPreview} from '../src/stories.mjs';
 import {qrRuns, qrFits, qrHeight, qrLayout, CHROME} from '../src/qr.mjs';
 import {settingsActionAt, settingsActionForKey, ACTIONS_ROW} from '../src/settings.mjs';
+import {railItemAt, nextAccount, unreadOf, statusTag, railVisible} from '../src/accounts.mjs';
 
 const CHATS = [
   {id: 'a@s.whatsapp.net', isGroup: false, name: 'Alice', unread: 2, lastMessage: 300},
@@ -137,4 +138,35 @@ test('qrLayout: QR real só cabe a partir de 40 linhas de terminal', () => {
   assert.equal(qrLayout(REAL_QR, 66, 40).fits, false, 'largura conta a moldura');
   assert.equal(qrLayout(REAL_QR, 90, 33 + CHROME).roomy, false, 'justo: sem respiros');
   assert.equal(qrLayout(REAL_QR, 90, 33 + CHROME + 3).roomy, true);
+});
+
+test('contas: clique no trilho vira conta ou "+ nova conta"', () => {
+  // borda (0), título (1), 2 linhas por conta a partir da 2
+  assert.equal(railItemAt(0, 2), null);
+  assert.equal(railItemAt(1, 2), null);
+  assert.deepEqual(railItemAt(2, 2), {kind: 'account', index: 0});
+  assert.deepEqual(railItemAt(3, 2), {kind: 'account', index: 0});
+  assert.deepEqual(railItemAt(5, 2), {kind: 'account', index: 1});
+  assert.deepEqual(railItemAt(6, 2), {kind: 'add'});
+  assert.equal(railItemAt(7, 2), null);
+});
+
+test('contas: Ctrl+↑/↓ dá a volta na lista', () => {
+  const accs = [{id: 'a'}, {id: 'b'}, {id: 'c'}];
+  assert.equal(nextAccount(accs, 'a', 1), 'b');
+  assert.equal(nextAccount(accs, 'c', 1), 'a');
+  assert.equal(nextAccount(accs, 'a', -1), 'c');
+  assert.equal(nextAccount([], 'a', 1), null);
+});
+
+test('contas: não lidas somadas, tags de estado e visibilidade do trilho', () => {
+  assert.equal(unreadOf([{unread: 2}, {unread: 0}, {unread: 3}]), 5);
+  assert.equal(unreadOf(undefined), 0);
+  assert.equal(statusTag({connected: true}), '[ONLINE]');
+  assert.equal(statusTag({connecting: true}), '[CONECTANDO]');
+  assert.equal(statusTag({needsLogin: true}), '[SEM SESSÃO]');
+  assert.equal(statusTag({loggedIn: true}), '[OFFLINE]');
+  assert.equal(railVisible([{id: 'a'}], 80), false);
+  assert.equal(railVisible([{id: 'a'}], 120), true);
+  assert.equal(railVisible([{id: 'a'}, {id: 'b'}], 80), true);
 });

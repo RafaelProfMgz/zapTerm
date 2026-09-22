@@ -101,7 +101,9 @@ type Bot struct {
 	// Enabled turns the auto-reply bot on or off.
 	Enabled bool
 	// ChatId is the only chat the bot will reply in (e.g. "5511999999999@s.whatsapp.net").
-	// For a group, use the group JID (ends with "@g.us").
+	// For a group, use the group JID (ends with "@g.us"). With several
+	// accounts, prefix the account id ("trabalho:1203...@g.us") to choose
+	// which one runs the bot; a plain JID runs on the first account only.
 	ChatId string
 	// TriggerPrefix, when non-empty, makes the bot reply ONLY to messages that
 	// start with this prefix (e.g. "@"). The prefix is stripped before the text
@@ -183,7 +185,7 @@ var Config = IniFile{
 	},
 	&Bot{
 		Enabled:             true,
-		ChatId:              "120363426087525156@g.us",
+		ChatId:              "",
 		TriggerPrefix:       "@",
 		Model:               "gpt-4o-mini",
 		SystemPrompt:        "You are a helpful WhatsApp assistant. Reply concisely in the same language as the message.",
@@ -239,22 +241,6 @@ func InitConfig() {
 
 func GetConfigFilePath() string {
 	return configFilePath
-}
-
-func GetSessionFilePath() string {
-	if sessionFilePath, err := xdg.ConfigFile("whatscli/session"); err == nil {
-		return sessionFilePath
-	}
-	return GetHomeDir() + ".whatscli.session"
-}
-
-// GetCacheFilePath is where the lightweight local conversation cache lives
-// (chats + recent messages as JSON), so conversations show up offline.
-func GetCacheFilePath() string {
-	if cacheFilePath, err := xdg.ConfigFile("whatscli/cache.json"); err == nil {
-		return cacheFilePath
-	}
-	return GetHomeDir() + ".whatscli.cache.json"
 }
 
 // gets the OS home dir with a path separator at the end

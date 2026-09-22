@@ -6,15 +6,26 @@ import {createInterface} from 'node:readline';
 
 const emit = o => process.stdout.write(JSON.stringify(o) + '\n');
 
-emit({type: 'ready', version: 'vTEST'});
-emit({type: 'status', connected: true, lastSeen: ''});
-emit({
-  type: 'chats',
-  chats: [
+// duas contas, como o núcleo real com accounts.json: todo evento de sessão
+// leva "account"; comandos sem "account" vão para a conta ativa
+const accounts = [
+  {id: 'default', label: 'Pessoal', jid: '5511900000001@s.whatsapp.net', connected: true, loggedIn: true},
+  {id: 'trabalho', label: 'Trabalho', jid: '', connected: false, loggedIn: false, needsLogin: true},
+];
+let active = 'default';
+const chatsOf = {
+  default: [
     {id: '123@s.whatsapp.net', isGroup: false, name: 'Alice', unread: 2, lastMessage: 1000},
     {id: 'grp@g.us', isGroup: true, name: 'Equipe', unread: 0, lastMessage: 900},
   ],
-});
+  trabalho: [{id: '999@s.whatsapp.net', isGroup: false, name: 'Cliente', unread: 1, lastMessage: 3000}],
+};
+
+emit({type: 'ready', version: 'vTEST'});
+emit({type: 'account', id: active});
+emit({type: 'accounts', active, accounts});
+emit({type: 'status', account: 'default', connected: true, lastSeen: ''});
+emit({type: 'chats', account: 'default', chats: chatsOf.default});
 emit({
   type: 'stories',
   stories: [
@@ -40,6 +51,15 @@ rl.on('line', line => {
   if (cmd.cmd === 'quit') {
     process.exit(0);
   }
+  const account = cmd.account || active;
+  if (cmd.cmd === 'conta' && accounts.some(a => a.id === cmd.params?.[0])) {
+    active = cmd.params[0];
+    emit({type: 'account', id: active});
+    emit({type: 'accounts', active, accounts});
+    emit({type: 'chats', account: active, chats: chatsOf[active] || []});
+    const acc = accounts.find(a => a.id === active);
+    emit({type: 'status', account: active, connected: acc.connected, loggedIn: acc.loggedIn, needsLogin: !!acc.needsLogin});
+  }
   if (cmd.cmd === 'reconectar' || cmd.cmd === 'novoqr') {
     emit({type: 'status', connected: false, loggedIn: false, connecting: true, needsLogin: false});
     emit({
@@ -59,8 +79,9 @@ rl.on('line', line => {
   if (cmd.cmd === 'select') {
     emit({
       type: 'screen',
+      account,
       messages: [{id: 'm1', chatId: cmd.params[0], text: 'oi', kind: 'text', timestamp: 1000, fromMe: false}],
     });
   }
-  emit({type: 'text', text: 'recv:' + cmd.cmd}); // eco p/ asserções
+  emit({type: 'text', account, text: 'recv:' + cmd.cmd}); // eco p/ asserções
 });

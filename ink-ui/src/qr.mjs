@@ -66,14 +66,17 @@ function Code({matrix}) {
   );
 }
 
-export default function QRScreen({qr, height, width}) {
+export default function QRScreen({qr, height, width, accountLabel}) {
   const matrix = qr?.matrix || [];
   const {fits, roomy} = qrLayout(matrix, width, height);
   // tudo em linhas/colunas do terminal inteiro (height é só o corpo: o app já
   // gastou 4 linhas com cabeçalho e taskbar)
   const need = `${matrix.length ? matrix[0].length : 0} colunas x ${qrHeight(matrix) + CHROME + 4} linhas`;
   return h(Box, {flexDirection: 'column', height, overflow: 'hidden', paddingX: 1},
-    h(Text, {color: theme.primary, bold: true}, 'PAREAR_APARELHO'),
+    h(Text, {wrap: 'truncate'},
+      h(Text, {color: theme.primary, bold: true}, 'PAREAR_APARELHO'),
+      // com várias contas, deixa claro qual está sendo pareada
+      accountLabel ? h(Text, {color: theme.secondary}, ` — CONTA: ${accountLabel.toUpperCase()}`) : null),
     h(Text, {color: theme.textDim, wrap: 'truncate'},
       qr?.message || 'aguardando o QR code do núcleo…'),
     roomy ? h(Text, null, ' ') : null,
@@ -97,6 +100,7 @@ export default function QRScreen({qr, height, width}) {
       : null,
     h(Box, {flexGrow: 1}),
     h(Text, {color: theme.secondary, wrap: 'truncate'},
-      '[O] abrir imagem · [N] novo QR · [C] cancelar · [ESC] esconder · [CTRL+R] reconectar'),
+      '[O] abrir imagem · [N] novo QR · [C] cancelar · [ESC] esconder · [CTRL+R] reconectar' +
+        (accountLabel ? ' · [ALT+1-9] outra conta' : '')),
   );
 }

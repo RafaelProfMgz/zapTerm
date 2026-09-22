@@ -52,3 +52,27 @@ func TestJsonUiSetStatusCarriesLoginState(t *testing.T) {
 		t.Fatalf("estado de login incompleto: %v", out)
 	}
 }
+
+// Each account's events carry "account"; the account list goes out unstamped.
+func TestJsonUiStampsAccount(t *testing.T) {
+	var buf bytes.Buffer
+	root := &JsonUiHandler{enc: json.NewEncoder(&buf)}
+	root.ForAccount("trabalho").PrintText("oi")
+	out := decode(t, &buf)
+	if out["type"] != "text" || out["account"] != "trabalho" {
+		t.Fatalf("evento sem a conta de origem: %v", out)
+	}
+	buf.Reset()
+	root.SetAccounts([]messages.AccountInfo{{ID: "trabalho", Label: "Trabalho", Status: messages.SessionStatus{NeedsLogin: true}}}, "trabalho")
+	out = decode(t, &buf)
+	list, _ := out["accounts"].([]any)
+	if out["type"] != "accounts" || out["active"] != "trabalho" || len(list) != 1 {
+		t.Fatalf("lista de contas errada: %v", out)
+	}
+	if _, stamped := out["account"]; stamped {
+		t.Fatalf("lista de contas não deveria levar account: %v", out)
+	}
+	if acc := list[0].(map[string]any); acc["label"] != "Trabalho" || acc["needsLogin"] != true {
+		t.Fatalf("conta incompleta: %v", acc)
+	}
+}

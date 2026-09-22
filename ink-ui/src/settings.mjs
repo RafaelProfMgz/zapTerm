@@ -96,7 +96,7 @@ function Button({action, danger}) {
   }, ` ${actionLabel(action)} `);
 }
 
-export default function SettingsScreen({version, status, binPath, height}) {
+export default function SettingsScreen({version, status, binPath, height, accountId}) {
   const state = status.connecting
     ? 'CONECTANDO…'
     : status.connected ? 'CONECTADO' : status.loggedIn ? 'DESCONECTADO' : 'SEM SESSÃO';
@@ -125,7 +125,7 @@ export default function SettingsScreen({version, status, binPath, height}) {
     h(Box, {flexShrink: 0},
       h(Card, {title: 'ARQUIVOS_DO_SISTEMA', grow: true, children: [
         h(Field, {key: 'cfg', label: 'CONFIG ', value: '~/.config/whatscli/whatscli.config'}),
-        h(Field, {key: 'db', label: 'SESSÃO ', value: '~/.config/whatscli/session.db'}),
+        h(Field, {key: 'db', label: 'SESSÃO ', value: `~/.config/whatscli/accounts/${accountId || 'default'}/session.db`}),
       ]}),
       h(Card, {title: 'NÚCLEO_GO', grow: true, children: [
         h(Field, {key: 'bin', label: 'BINÁRIO', value: binPath || '?'}),
@@ -157,6 +157,8 @@ export default function SettingsScreen({version, status, binPath, height}) {
         h(Key, {key: 'pod', k: 'P/O/D', action: 'tocar áudio · abrir anexo · baixar (mensagem selecionada)'}),
         h(Key, {key: 'b', k: 'B', action: 'carregar histórico (backlog)'}),
         h(Key, {key: 'rec', k: 'CTRL+R', action: 'reconectar ao WhatsApp de qualquer tela'}),
+        h(Key, {key: 'acc', k: 'ALT+1-9', action: 'trocar de conta (CTRL+↑/↓ anda na lista, + cria uma nova)'}),
+        h(Key, {key: 'accc', k: '/CONTA', action: '/contas · /conta <n> · /conta nova|renomear|remover'}),
         h(Key, {key: 'cmd', k: '/CMD', action: 'comando do núcleo Go (/reconectar, /novoqr, /openqr, /read…)'}),
         h(Key, {key: 'q', k: 'CTRL+Q', action: 'sair'}),
       ]}),
